@@ -46,7 +46,7 @@ class Nav2WaypointMakerGUI(tk.Toplevel):
         selected_index = self.listbox.curselection()
         if selected_index:
             insert_index = selected_index[0] + 1 # 選択された項目の次に追加
-            messagebox.showinfo("Add Waypoint", f"Use the 2D Goal Pose tool in rviz to set the new waypoint to insert after index {insert_index - 1}.")
+            # messagebox.showinfo("Add Waypoint", f"Use the 2D Goal Pose tool in rviz to set the new waypoint to insert after index {insert_index - 1}.")
             self.waypoint_maker_node.is_adding = True
             self.waypoint_maker_node.insert_index = insert_index
         else:
