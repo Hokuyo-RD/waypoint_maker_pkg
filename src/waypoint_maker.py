@@ -32,6 +32,7 @@ class Nav2WaypointMakerGUI(tk.Toplevel):
         tk.Button(button_frame, text="Remove Selected", command=self.remove_waypoint).pack(fill=tk.X)
         tk.Button(button_frame, text="Replace Selected (2D Goal)", command=self.replace_waypoint).pack(fill=tk.X)
         tk.Button(button_frame, text="Save Waypoints", command=self.save_waypoints).pack(fill=tk.X)
+        tk.Button(button_frame, text="Close", command=self.close_application).pack(fill=tk.X) # Close ボタンを追加
         self.update_listbox()
         button_frame.pack(side=tk.TOP, fill=tk.X)
 
@@ -45,7 +46,7 @@ class Nav2WaypointMakerGUI(tk.Toplevel):
     def add_waypoint(self):
         selected_index = self.listbox.curselection()
         if selected_index:
-            insert_index = selected_index[0] + 1 # 選択された項目の次に追加
+            insert_index = selected_index[0] + 1
             messagebox.showinfo("Add Waypoint", f"Use the 2D Goal Pose tool in rviz to set the new waypoint to insert after index {insert_index - 1}.")
             self.waypoint_maker_node.is_adding = True
             self.waypoint_maker_node.insert_index = insert_index
@@ -78,6 +79,11 @@ class Nav2WaypointMakerGUI(tk.Toplevel):
         self.waypoint_maker_node.save_waypoints_to_json()
         messagebox.showinfo("Info", "Waypoints saved to file.")
 
+    def close_application(self):
+        self.waypoint_maker_node.get_logger().info("Closing application via GUI button")
+        self.waypoint_maker_node.shutdown_node()
+        self.destroy() # tkinter ウィンドウを閉じる
+
 class Nav2WaypointMaker(Node):
     def __init__(self, mode, filename):
         super().__init__('nav2_waypoint_maker_' + mode)
@@ -86,13 +92,14 @@ class Nav2WaypointMaker(Node):
         self.filename = filename
         self.replace_index = -1
         self.is_adding = False
-        self.insert_index = -1 # 挿入位置を保持する変数
+        self.insert_index = -1
         self.previous_pose = None
         self.last_message_time = self.get_clock().now()
         self.joy_button = self.declare_parameter('waypoint_button', 1).value
         self.distance_threshold = self.declare_parameter('auto_waypoint_distance', 5.0).value
         self.topic_timeout = self.declare_parameter('estimated_pose_timeout', 20.0).value
         self.lio_loc_pose = PoseStamped()
+        self._spin_thread = None # spin 用のスレッドを保持
 
         self.waypoint_pub = self.create_publisher(PoseArray, 'waypoints', 10)
         self.marker_pub = self.create_publisher(Marker, 'waypoint_markers', 10)
@@ -116,6 +123,8 @@ class Nav2WaypointMaker(Node):
             self.publish_waypoints_for_vis()
             self.rewrite_marker()
             self.get_logger().info("Edit mode enabled with separate GUI.")
+            self._spin_thread = threading.Thread(target=rclpy.spin, args=(self,))
+            self._spin_thread.start()
         else:
             self.get_logger().error(f"Invalid mode: {self.mode}. Use 'write', 'read', or 'edit'.")
             sys.exit()
@@ -202,7 +211,7 @@ class Nav2WaypointMaker(Node):
             self.waypoints[self.replace_index] = msg
             self.replace_index = -1
             self.is_adding = False
-            self.insert_index = -1 # 念のためリセット
+            self.insert_index = -1
             self.gui.update_listbox()
             self.save_waypoints_to_json()
             self.publish_waypoints_for_vis()
@@ -220,13 +229,13 @@ class Nav2WaypointMaker(Node):
             self.publish_waypoints_for_vis()
             self.rewrite_marker()
             self.get_logger().info(f"Waypoint inserted at index {self.insert_index} via /goal_pose")
-        elif self.mode == 'edit' and self.is_adding: # 選択なしで追加する場合（末尾に追加）
+        elif self.mode == 'edit' and self.is_adding:
             if msg.header.frame_id != "map":
                 self.get_logger().warn("Received goal in non-map frame. Assuming map frame.")
                 msg.header.frame_id = "map"
             self.waypoints.append(msg)
             self.is_adding = False
-            self.insert_index = -1 # 念のためリセット
+            self.insert_index = -1
             self.gui.update_listbox()
             self.save_waypoints_to_json()
             self.publish_waypoints_for_vis()
@@ -272,15 +281,15 @@ class Nav2WaypointMaker(Node):
         if self.mode == 'write':
             waypoint = PoseStamped()
             waypoint.header = self.lio_loc_pose.header
-            waypoint.pose = self.lio_loc_pose
-        if waypoint.header.frame_id != "map":
-            self.get_logger().warn("Appending waypoint in non-map frame. Assuming map frame.")
-            waypoint.header.frame_id = "map"
-        self.waypoints.append(waypoint)
-        self.save_waypoints_to_json()
-        self.rewrite_marker()
-        self.publish_waypoints_for_vis()
-        self.get_logger().info("Waypoint added from /estimated_pose")
+            waypoint.pose = self.lio_loc_pose.pose
+            if waypoint.header.frame_id != "map":
+                self.get_logger().warn("Appending waypoint in non-map frame. Assuming map frame.")
+                waypoint.header.frame_id = "map"
+            self.waypoints.append(waypoint)
+            self.save_waypoints_to_json()
+            self.rewrite_marker()
+            self.publish_waypoints_for_vis()
+            self.get_logger().info("Waypoint added from /estimated_pose")
 
     def joy_callback(self, msg):
         if self.mode == 'write':
@@ -358,8 +367,10 @@ class Nav2WaypointMaker(Node):
                 self.get_logger().warn(f"Timeout on /estimated_pose topic. Last message received {self.topic_timeout} seconds ago.")
                 self.previous_pose = None
 
-def ros_spin(node):
-    rclpy.spin(node)
+    def shutdown_node(self):
+        self.get_logger().info("Shutting down Nav2WaypointMaker node")
+        self.destroy_node()
+        rclpy.shutdown()
 
 def main(args=None):
     rclpy.init(args=args)
@@ -390,7 +401,8 @@ def main(args=None):
     if mode and filename:
         node = Nav2WaypointMaker(mode, filename)
         if mode == 'edit':
-            thread = threading.Thread(target=ros_spin, args=(node,))
+            thread = threading.Thread(target=rclpy.spin, args=(node,))
+            thread.daemon = True # メインスレッドが終了したらスレッドも終了
             thread.start()
             tk.mainloop()
         else:
