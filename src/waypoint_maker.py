@@ -70,7 +70,7 @@ class Nav2WaypointMakerGUI(tk.Toplevel):
         selected_index = self.listbox.curselection()
         if selected_index:
             self.waypoint_maker_node.replace_index = selected_index[0]
-            messagebox.showinfo("Replace Waypoint", "Use the 2D Goal Pose tool in rviz to set the new pose for the selected waypoint.")
+            # messagebox.showinfo("Replace Waypoint", "Use the 2D Goal Pose tool in rviz to set the new pose for the selected waypoint.")
         else:
             messagebox.showerror("Error", "Please select a waypoint to replace.")
 
@@ -272,7 +272,7 @@ class Nav2WaypointMaker(Node):
         if self.mode == 'write':
             waypoint = PoseStamped()
             waypoint.header = self.lio_loc_pose.header
-            waypoint.pose = self.lio_loc_pose
+            waypoint.pose = self.lio_loc_pose.pose
         if waypoint.header.frame_id != "map":
             self.get_logger().warn("Appending waypoint in non-map frame. Assuming map frame.")
             waypoint.header.frame_id = "map"
@@ -352,11 +352,10 @@ class Nav2WaypointMaker(Node):
             self.last_message_time = self.get_clock().now()
 
     def check_timeout(self):
-        if self.mode == 'write':
-            current_time = self.get_clock().now()
-            if (current_time - self.last_message_time).to_sec() > self.topic_timeout:
-                self.get_logger().warn(f"Timeout on /estimated_pose topic. Last message received {self.topic_timeout} seconds ago.")
-                self.previous_pose = None
+        current_time = self.get_clock().now()
+        time_diff = current_time - self.last_message_time
+        if time_diff.nanoseconds / 1e9 > self.topic_timeout:
+            self.get_logger().warn("Timeout on /estimated_pose. Last message older than specified limit.")
 
 def ros_spin(node):
     rclpy.spin(node)
