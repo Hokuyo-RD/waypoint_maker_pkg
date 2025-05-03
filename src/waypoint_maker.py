@@ -55,14 +55,14 @@ class Nav2WaypointMaker(Node):
                 self.waypoints = []
                 for item in data:
                     pose_stamped = PoseStamped()
-                    pose_stamped.header.frame_id = item.get("frame_id", "map") # frame_id がない場合は "map" をデフォルトに
-                    pose_stamped.pose.position.x = item["position"][0]
-                    pose_stamped.pose.position.y = item["position"][1]
-                    pose_stamped.pose.position.z = item["position"][2]
-                    pose_stamped.pose.orientation.x = item["orientation"][0]
-                    pose_stamped.pose.orientation.y = item["orientation"][1]
-                    pose_stamped.pose.orientation.z = item["orientation"][2]
-                    pose_stamped.pose.orientation.w = item["orientation"][3]
+                    pose_stamped.header.frame_id = "map" # JSON に frame_id はないので固定で "map" を設定
+                    pose_stamped.pose.position.x = item[0][0]
+                    pose_stamped.pose.position.y = item[0][1]
+                    pose_stamped.pose.position.z = 0.0 # JSON に z はないので固定で 0.0 を設定
+                    pose_stamped.pose.orientation.x = 0.0
+                    pose_stamped.pose.orientation.y = 0.0
+                    pose_stamped.pose.orientation.z = item[1][2]
+                    pose_stamped.pose.orientation.w = item[1][3]
                     self.waypoints.append(pose_stamped)
             self.rewrite_marker()
             self.publish_waypoints_for_vis()
@@ -72,16 +72,15 @@ class Nav2WaypointMaker(Node):
             self.save_waypoints_to_json()
         except json.JSONDecodeError:
             self.get_logger().error(f"Failed to decode JSON in {self.filename}. Please check the file format.")
-        except KeyError as e:
-            self.get_logger().error(f"Missing key in JSON file: {e}. Please check the file format.")
+        except IndexError:
+            self.get_logger().error(f"Invalid JSON format in {self.filename}. Expected [[x, y, 0.0], [0.0, 0.0, z, w]].")
 
     def save_waypoints_to_json(self):
         data = []
         for pose_stamped in self.waypoints:
-            position = [pose_stamped.pose.position.x, pose_stamped.pose.position.y, pose_stamped.pose.position.z]
-            orientation = [pose_stamped.pose.orientation.x, pose_stamped.pose.orientation.y,
-                           pose_stamped.pose.orientation.z, pose_stamped.pose.orientation.w]
-            data.append({"position": position, "orientation": orientation, "frame_id": pose_stamped.header.frame_id})
+            position = [pose_stamped.pose.position.x, pose_stamped.pose.position.y, 0.0]
+            orientation = [0.0, 0.0, pose_stamped.pose.orientation.z, pose_stamped.pose.orientation.w]
+            data.append([position, orientation])
         try:
             with open(self.filename, 'w') as f:
                 json.dump(data, f, indent=4)
