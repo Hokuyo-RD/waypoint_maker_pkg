@@ -46,7 +46,8 @@ class Nav2WaypointMakerGUI(tk.Toplevel):
     def add_waypoint(self):
         selected_index = self.listbox.curselection()
         if selected_index:
-            insert_index = selected_index[0] + 1
+            insert_index = selected_index[0] + 1 # 選択された項目の次に追加
+            messagebox.showinfo("Add Waypoint", f"Use the 2D Goal Pose tool in rviz to set the new waypoint to insert after index {insert_index - 1}.")
             self.waypoint_maker_node.is_adding = True
             self.waypoint_maker_node.insert_index = insert_index
         else:
@@ -91,7 +92,7 @@ class Nav2WaypointMaker(Node):
         self.filename = filename
         self.replace_index = -1
         self.is_adding = False
-        self.insert_index = -1
+        self.insert_index = -1 # 挿入位置を保持する変数
         self.previous_pose = None
         self.last_message_time = self.get_clock().now()
         self.joy_button = self.declare_parameter('waypoint_button', 1).value
@@ -210,7 +211,7 @@ class Nav2WaypointMaker(Node):
             self.waypoints[self.replace_index] = msg
             self.replace_index = -1
             self.is_adding = False
-            self.insert_index = -1
+            self.insert_index = -1 # 念のためリセット
             self.gui.update_listbox()
             self.save_waypoints_to_json()
             self.publish_waypoints_for_vis()
@@ -228,13 +229,13 @@ class Nav2WaypointMaker(Node):
             self.publish_waypoints_for_vis()
             self.rewrite_marker()
             self.get_logger().info(f"Waypoint inserted at index {self.insert_index} via /goal_pose")
-        elif self.mode == 'edit' and self.is_adding:
+        elif self.mode == 'edit' and self.is_adding: # 選択なしで追加する場合（末尾に追加）
             if msg.header.frame_id != "map":
                 self.get_logger().warn("Received goal in non-map frame. Assuming map frame.")
                 msg.header.frame_id = "map"
             self.waypoints.append(msg)
             self.is_adding = False
-            self.insert_index = -1
+            self.insert_index = -1 # 念のためリセット
             self.gui.update_listbox()
             self.save_waypoints_to_json()
             self.publish_waypoints_for_vis()
@@ -280,15 +281,15 @@ class Nav2WaypointMaker(Node):
         if self.mode == 'write':
             waypoint = PoseStamped()
             waypoint.header = self.lio_loc_pose.header
-            waypoint.pose = self.lio_loc_pose.pose
-            if waypoint.header.frame_id != "map":
-                self.get_logger().warn("Appending waypoint in non-map frame. Assuming map frame.")
-                waypoint.header.frame_id = "map"
-            self.waypoints.append(waypoint)
-            self.save_waypoints_to_json()
-            self.rewrite_marker()
-            self.publish_waypoints_for_vis()
-            self.get_logger().info("Waypoint added from /estimated_pose")
+            waypoint.pose = self.lio_loc_pose
+        if waypoint.header.frame_id != "map":
+            self.get_logger().warn("Appending waypoint in non-map frame. Assuming map frame.")
+            waypoint.header.frame_id = "map"
+        self.waypoints.append(waypoint)
+        self.save_waypoints_to_json()
+        self.rewrite_marker()
+        self.publish_waypoints_for_vis()
+        self.get_logger().info("Waypoint added from /estimated_pose")
 
     def joy_callback(self, msg):
         if self.mode == 'write':
