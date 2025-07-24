@@ -14,12 +14,12 @@ import tkinter as tk
 from tkinter import simpledialog, messagebox, Listbox, Scrollbar
 import threading
 
-class Nav2WaypointMakerGUI(tk.Toplevel):
-    def __init__(self, parent, waypoint_maker_node):
+class Nav2WaypointManagerGUI(tk.Toplevel):
+    def __init__(self, parent, waypoint_manager_node):
         super().__init__(parent)
         self.title("Waypoint Editor")
-        self.waypoint_maker_node = waypoint_maker_node
-        self.waypoint_list = waypoint_maker_node.waypoints
+        self.waypoint_manager_node = waypoint_manager_node
+        self.waypoint_list = waypoint_manager_node.waypoints
         self.listbox = Listbox(self, width=50, height=15)
         self.scrollbar = Scrollbar(self)
         self.listbox.config(yscrollcommand=self.scrollbar.set)
@@ -47,21 +47,21 @@ class Nav2WaypointMakerGUI(tk.Toplevel):
         if selected_index:
             insert_index = selected_index[0] + 1 # 選択された項目の次に追加
             # messagebox.showinfo("Add Waypoint", f"Use the 2D Goal Pose tool in rviz to set the new waypoint to insert after index {insert_index - 1}.")
-            self.waypoint_maker_node.is_adding = True
-            self.waypoint_maker_node.insert_index = insert_index
+            self.waypoint_manager_node.is_adding = True
+            self.waypoint_manager_node.insert_index = insert_index
         else:
             messagebox.showinfo("Add Waypoint", "Use the 2D Goal Pose tool in rviz to set the new waypoint at the end of the list.")
-            self.waypoint_maker_node.is_adding = True
-            self.waypoint_maker_node.insert_index = len(self.waypoint_list)
+            self.waypoint_manager_node.is_adding = True
+            self.waypoint_manager_node.insert_index = len(self.waypoint_list)
 
     def remove_waypoint(self):
         selected_index = self.listbox.curselection()
         if selected_index:
             index_to_remove = selected_index[0]
             del self.waypoint_list[index_to_remove]
-            self.waypoint_maker_node.save_waypoints_to_json()
-            self.waypoint_maker_node.publish_waypoints_for_vis()
-            self.waypoint_maker_node.rewrite_marker()
+            self.waypoint_manager_node.save_waypoints_to_json()
+            self.waypoint_manager_node.publish_waypoints_for_vis()
+            self.waypoint_manager_node.rewrite_marker()
             self.update_listbox()
         else:
             messagebox.showerror("Error", "Please select a waypoint to remove.")
@@ -69,18 +69,18 @@ class Nav2WaypointMakerGUI(tk.Toplevel):
     def replace_waypoint(self):
         selected_index = self.listbox.curselection()
         if selected_index:
-            self.waypoint_maker_node.replace_index = selected_index[0]
+            self.waypoint_manager_node.replace_index = selected_index[0]
             # messagebox.showinfo("Replace Waypoint", "Use the 2D Goal Pose tool in rviz to set the new pose for the selected waypoint.")
         else:
             messagebox.showerror("Error", "Please select a waypoint to replace.")
 
     def save_waypoints(self):
-        self.waypoint_maker_node.save_waypoints_to_json()
+        self.waypoint_manager_node.save_waypoints_to_json()
         messagebox.showinfo("Info", "Waypoints saved to file.")
 
-class Nav2WaypointMaker(Node):
+class Nav2WaypointManager(Node):
     def __init__(self, mode, filename):
-        super().__init__('nav2_waypoint_maker_' + mode)
+        super().__init__('nav2_waypoint_manager_' + mode)
         self.waypoints = []
         self.mode = mode
         self.filename = filename
@@ -100,7 +100,7 @@ class Nav2WaypointMaker(Node):
 
         if self.mode == 'write':
             self.load_waypoints_from_json()
-            self.amcl_sub = self.create_subscription(PoseStamped, '/estimated_pose', self.amcl_callback, qos_profile_sensor_data)
+            self.lio_loc_sub = self.create_subscription(PoseStamped, '/estimated_pose', self.lio_loc_callback, qos_profile_sensor_data)
             self.initialpose_sub = self.create_subscription(PoseWithCovarianceStamped, '/initialpose', self.init_pose_callback, 10)
             self.joy_sub = self.create_subscription(Joy, '/joy', self.joy_callback, qos_profile_sensor_data)
             self.remove_sub = self.create_subscription(Int16, '/remove_waypoint', self.remove_callback, 10)
@@ -112,7 +112,7 @@ class Nav2WaypointMaker(Node):
             self.rewrite_marker()
         elif self.mode == 'edit':
             self.load_waypoints_from_json()
-            self.gui = Nav2WaypointMakerGUI(None, self)
+            self.gui = Nav2WaypointManagerGUI(None, self)
             self.publish_waypoints_for_vis()
             self.rewrite_marker()
             self.get_logger().info("Edit mode enabled with separate GUI.")
@@ -252,7 +252,7 @@ class Nav2WaypointMaker(Node):
         else:
             self.get_logger().warn(f"Invalid index for insertion: {index}")
 
-    def amcl_callback(self, msg):
+    def lio_loc_callback(self, msg):
         if self.mode == 'write':
             self.lio_loc_pose = msg
             self.last_message_time = self.get_clock().now()
@@ -265,10 +265,10 @@ class Nav2WaypointMaker(Node):
                     (self.lio_loc_pose.pose.position.y - self.previous_pose.pose.position.y) ** 2
                 )
                 if distance >= self.distance_threshold:
-                    self.amcl_waypoint_append()
+                    self.lio_loc_waypoint_append()
                     self.previous_pose = self.lio_loc_pose
 
-    def amcl_waypoint_append(self):
+    def lio_loc_waypoint_append(self):
         if self.mode == 'write':
             waypoint = PoseStamped()
             waypoint.header = self.lio_loc_pose.header
@@ -364,7 +364,7 @@ def main(args=None):
     rclpy.init(args=args)
 
     if len(sys.argv) < 3:
-        print("Usage: ros2 run waypoint_maker_pkg waypoint_maker [-w|-r|-e] <filename>.json")
+        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-r|-e] <filename>.json")
         sys.exit()
 
     mode = None
@@ -377,17 +377,17 @@ def main(args=None):
     elif sys.argv[1] == '-e':
         mode = 'edit'
     else:
-        print("Usage: ros2 run waypoint_maker_pkg waypoint_maker [-w|-r|-e] <filename>.json")
+        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-r|-e] <filename>.json")
         sys.exit()
 
     if len(sys.argv) > 2:
         filename = sys.argv[2]
     else:
-        print("Usage: ros2 run waypoint_maker_pkg waypoint_maker [-w|-r|-e] <filename>.json")
+        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-r|-e] <filename>.json")
         sys.exit()
 
     if mode and filename:
-        node = Nav2WaypointMaker(mode, filename)
+        node = Nav2WaypointManager(mode, filename)
         if mode == 'edit':
             thread = threading.Thread(target=ros_spin, args=(node,))
             thread.start()
