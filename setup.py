@@ -1,6 +1,6 @@
 from setuptools import setup
 
-package_name = 'waypoint_maker_pkg'
+package_name = 'waypoint_manager'
 
 setup(
     name=package_name,
