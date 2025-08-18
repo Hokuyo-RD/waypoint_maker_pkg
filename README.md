@@ -180,8 +180,7 @@ edit モードの場合、ros_spin 関数を新しいスレッドで実行し、
 
 Bash
 ```
-ros2 run your_package_name waypoint_maker [-w|-r|-e] filename.json
-your_package_name: このPythonスクリプトを含むROS 2パッケージの名前
+ros2 run waypoint_manager waypoint_manager [-w|-r|-e] filename.json
 ```
 
 -w: write モード (ウェイポイント記録)

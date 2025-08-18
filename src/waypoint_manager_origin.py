@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-
 import rclpy
 from rclpy.node import Node
-from rclpy.action import ActionClient
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy, QoSDurabilityPolicy
 import sys
 import json
-import os
 from geometry_msgs.msg import PoseArray, PoseStamped, PoseWithCovarianceStamped
 from sensor_msgs.msg import Joy
 from std_msgs.msg import Int16
@@ -15,11 +11,8 @@ from rclpy.qos import qos_profile_sensor_data
 import math
 from builtin_interfaces.msg import Duration as DurationMsg
 import tkinter as tk
-from tkinter import messagebox, Listbox, Scrollbar
+from tkinter import simpledialog, messagebox, Listbox, Scrollbar
 import threading
-
-# 統合されたnav2_msgs.actionをインポート
-from nav2_msgs.action import FollowWaypoints
 
 class Nav2WaypointManagerGUI(tk.Toplevel):
     def __init__(self, parent, waypoint_manager_node):
@@ -52,7 +45,8 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
     def add_waypoint(self):
         selected_index = self.listbox.curselection()
         if selected_index:
-            insert_index = selected_index[0] + 1
+            insert_index = selected_index[0] + 1 # 選択された項目の次に追加
+            # messagebox.showinfo("Add Waypoint", f"Use the 2D Goal Pose tool in rviz to set the new waypoint to insert after index {insert_index - 1}.")
             self.waypoint_manager_node.is_adding = True
             self.waypoint_manager_node.insert_index = insert_index
         else:
@@ -76,6 +70,7 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
         selected_index = self.listbox.curselection()
         if selected_index:
             self.waypoint_manager_node.replace_index = selected_index[0]
+            # messagebox.showinfo("Replace Waypoint", "Use the 2D Goal Pose tool in rviz to set the new pose for the selected waypoint.")
         else:
             messagebox.showerror("Error", "Please select a waypoint to replace.")
 
@@ -84,37 +79,24 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
         messagebox.showinfo("Info", "Waypoints saved to file.")
 
 class Nav2WaypointManager(Node):
-    def __init__(self, mode, filename, is_looping=True):
+    def __init__(self, mode, filename):
         super().__init__('nav2_waypoint_manager_' + mode)
         self.waypoints = []
         self.mode = mode
         self.filename = filename
         self.replace_index = -1
         self.is_adding = False
-        self.insert_index = -1
+        self.insert_index = -1 # 挿入位置を保持する変数
         self.previous_pose = None
         self.last_message_time = self.get_clock().now()
         self.joy_button = self.declare_parameter('waypoint_button', 1).value
         self.distance_threshold = self.declare_parameter('auto_waypoint_distance', 5.0).value
         self.topic_timeout = self.declare_parameter('estimated_pose_timeout', 20.0).value
         self.lio_loc_pose = PoseStamped()
-        self.is_looping = is_looping
-
-        # QoSプロファイルの設定 (Nav2との通信用)
-        qos_profile = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-            durability=QoSDurabilityPolicy.VOLATILE
-        )
 
         self.waypoint_pub = self.create_publisher(PoseArray, 'waypoints', 10)
         self.marker_pub = self.create_publisher(Marker, 'waypoint_markers', 10)
         self.goal_sub = self.create_subscription(PoseStamped, '/goal_pose', self.goal_callback, 10)
-
-        # Nav2executerの機能を追加
-        self.action_client = ActionClient(self, FollowWaypoints, 'follow_waypoints')
-        self.change_params = [] # パラメータ変更機能はここでは省略
 
         if self.mode == 'write':
             self.load_waypoints_from_json()
@@ -128,9 +110,6 @@ class Nav2WaypointManager(Node):
             self.load_waypoints_from_json()
             self.publish_waypoints_for_vis()
             self.rewrite_marker()
-            # ここからナビゲーションを開始
-            self.send_waypoints_goal()
-            self.get_logger().info("Read mode enabled. Starting navigation...")
         elif self.mode == 'edit':
             self.load_waypoints_from_json()
             self.gui = Nav2WaypointManagerGUI(None, self)
@@ -223,7 +202,7 @@ class Nav2WaypointManager(Node):
             self.waypoints[self.replace_index] = msg
             self.replace_index = -1
             self.is_adding = False
-            self.insert_index = -1
+            self.insert_index = -1 # 念のためリセット
             self.gui.update_listbox()
             self.save_waypoints_to_json()
             self.publish_waypoints_for_vis()
@@ -241,13 +220,13 @@ class Nav2WaypointManager(Node):
             self.publish_waypoints_for_vis()
             self.rewrite_marker()
             self.get_logger().info(f"Waypoint inserted at index {self.insert_index} via /goal_pose")
-        elif self.mode == 'edit' and self.is_adding:
+        elif self.mode == 'edit' and self.is_adding: # 選択なしで追加する場合（末尾に追加）
             if msg.header.frame_id != "map":
                 self.get_logger().warn("Received goal in non-map frame. Assuming map frame.")
                 msg.header.frame_id = "map"
             self.waypoints.append(msg)
             self.is_adding = False
-            self.insert_index = -1
+            self.insert_index = -1 # 念のためリセット
             self.gui.update_listbox()
             self.save_waypoints_to_json()
             self.publish_waypoints_for_vis()
@@ -378,55 +357,6 @@ class Nav2WaypointManager(Node):
         if time_diff.nanoseconds / 1e9 > self.topic_timeout:
             self.get_logger().warn("Timeout on /estimated_pose. Last message older than specified limit.")
 
-    # Nav2Executerから統合されたメソッド
-    def send_waypoints_goal(self):
-        """ウェイポイントをNav2アクションサーバーに送信する"""
-        if not self.waypoints:
-            self.get_logger().error("No waypoints loaded. Exiting.")
-            return
-
-        self.get_logger().info("Waiting for Nav2 action server...")
-        if not self.action_client.wait_for_server(timeout_sec=10.0):
-            self.get_logger().error("Nav2 action server not available after waiting. Exiting.")
-            return
-
-        goal_msg = FollowWaypoints.Goal()
-        goal_msg.poses = self.waypoints
-
-        self.get_logger().info("Sending goal to Nav2 action server...")
-        self._action_client_future = self.action_client.send_goal_async(goal_msg)
-        self._action_client_future.add_done_callback(self.goal_response_callback)
-
-    def goal_response_callback(self, future):
-        """ゴールレスポンスを処理する"""
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            self.get_logger().error('Goal was rejected by action server')
-            return
-
-        self.get_logger().info('Goal accepted! Waiting for result...')
-        self._get_result_future = goal_handle.get_result_async()
-        self._get_result_future.add_done_callback(self.get_result_callback)
-
-    def get_result_callback(self, future):
-        """アクションの結果を処理する"""
-        result = future.result().result
-        status = future.result().status
-        
-        if status == 2:  # succeeded
-            self.get_logger().info('Goal succeeded! All waypoints reached.')
-        else:
-            self.get_logger().warn(f'Goal failed with status: {status}')
-        
-        # is_loopingフラグに基づいてループを制御
-        if self.is_looping:
-            self.get_logger().info('Looping back to the beginning...')
-            self.send_waypoints_goal()
-        else:
-            self.get_logger().info('All waypoints processed once. Shutting down.')
-            # ここでrclpy.shutdown()を呼び出すとノード全体が終了
-            # 外部で制御できるようにここでは何もしない
-
 def ros_spin(node):
     rclpy.spin(node)
 
@@ -434,37 +364,30 @@ def main(args=None):
     rclpy.init(args=args)
 
     if len(sys.argv) < 3:
-        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-r|-e] <filename>.json [once]")
+        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-r|-e] <filename>.json")
         sys.exit()
 
     mode = None
     filename = None
-    is_once = False # onceオプションを追跡する新しいフラグ
 
-    # コマンドライン引数の解析
-    if '-w' in sys.argv:
+    if sys.argv[1] == '-w':
         mode = 'write'
-    elif '-r' in sys.argv:
+    elif sys.argv[1] == '-r':
         mode = 'read'
-    elif '-e' in sys.argv:
+    elif sys.argv[1] == '-e':
         mode = 'edit'
     else:
-        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-r|-e] <filename>.json [once]")
+        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-r|-e] <filename>.json")
         sys.exit()
 
-    # ファイル名を取得
-    if len(sys.argv) > sys.argv.index(sys.argv[1]) + 1:
-        filename = sys.argv[sys.argv.index(sys.argv[1]) + 1]
+    if len(sys.argv) > 2:
+        filename = sys.argv[2]
     else:
-        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-r|-e] <filename>.json [once]")
+        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-r|-e] <filename>.json")
         sys.exit()
-
-    # onceオプションをチェック
-    if 'once' in sys.argv:
-        is_once = True
 
     if mode and filename:
-        node = Nav2WaypointManager(mode, filename, not is_once)
+        node = Nav2WaypointManager(mode, filename)
         if mode == 'edit':
             thread = threading.Thread(target=ros_spin, args=(node,))
             thread.start()
