@@ -10,8 +10,7 @@ setup(
     packages=[package_name], 
     py_modules=[
         # 既存のモジュールに加えて新しいモジュールを追加
-        'src.waypoint_manager',
-        'src.nav2_executer'
+        'src.waypoint_manager'
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -29,7 +28,6 @@ setup(
         'console_scripts': [
             # 既存のノードに加えて新しいノードを追加
             'waypoint_manager = src.waypoint_manager:main',
-            'nav2_executer = src.nav2_executer:main'
         ],
     },
 )
