@@ -511,7 +511,11 @@ class Nav2WaypointManager(Node):
         goal_msg.poses = self.waypoints
 
         self.get_logger().info("Sending goal to Nav2 action server...")
-        self._action_client_future = self.action_client.send_goal_async(goal_msg)
+        # 修正: フィードバックコールバックを追加
+        self._action_client_future = self.action_client.send_goal_async(
+            goal_msg,
+            feedback_callback=self.feedback_callback
+        )
         self._action_client_future.add_done_callback(self.goal_response_callback)
 
     def goal_response_callback(self, future):
@@ -524,16 +528,18 @@ class Nav2WaypointManager(Node):
         self._get_result_future = goal_handle.get_result_async()
         self._get_result_future.add_done_callback(self.get_result_callback)
 
+    # 修正: feedback_callback関数を追加
+    def feedback_callback(self, feedback_msg):
+        feedback = feedback_msg.feedback
+        completed_waypoint_index = feedback.current_waypoint - 1
+        
+        if completed_waypoint_index >= 0 and completed_waypoint_index < len(self.attributes):
+            attribute = self.attributes[completed_waypoint_index]
+            self.process_waypoint_attribute(attribute)
+
     def get_result_callback(self, future):
         result = future.result().result
         status = future.result().status
-
-        # Fix: Use 'missed_waypoints' instead of 'completed_waypoints'
-        last_completed_waypoint_index = len(self.waypoints) - len(result.missed_waypoints) - 1
-        
-        if last_completed_waypoint_index >= 0 and last_completed_waypoint_index < len(self.attributes):
-            attribute = self.attributes[last_completed_waypoint_index]
-            self.process_waypoint_attribute(attribute)
         
         if status == GoalStatus.STATUS_SUCCEEDED:
             self.get_logger().info('Goal succeeded! All waypoints reached.')
