@@ -215,7 +215,6 @@ class Nav2WaypointManager(Node):
 
         self.waypoint_pub = self.create_publisher(PoseArray, 'waypoints', 10)
         self.marker_pub = self.create_publisher(Marker, 'waypoint_markers', 10)
-        self.goal_sub = self.create_subscription(PoseStamped, '/goal_pose', self.goal_callback, 10)
         
         self.set_parameters_client = self.create_client(SetParameters, '/controller_server/set_parameters')
         while not self.set_parameters_client.wait_for_service(timeout_sec=1.0):
@@ -227,6 +226,7 @@ class Nav2WaypointManager(Node):
 
         if self.mode == 'write':
             self.load_waypoints_from_json()
+            self.goal_sub = self.create_subscription(PoseStamped, '/goal_pose', self.goal_callback, 10)
             self.lio_loc_sub = self.create_subscription(PoseStamped, '/estimated_pose', self.lio_loc_callback, qos_profile_sensor_data)
             self.initialpose_sub = self.create_subscription(PoseWithCovarianceStamped, '/initialpose', self.init_pose_callback, 10)
             self.joy_sub = self.create_subscription(Joy, '/joy', self.joy_callback, qos_profile_sensor_data)
@@ -241,11 +241,23 @@ class Nav2WaypointManager(Node):
             self.get_logger().info("Execute mode enabled. Starting navigation...")
         elif self.mode == 'edit':
             self.load_waypoints_from_json()
-            # GUIはmain関数で初期化するため、ここでは何もしない
+            self.goal_sub = self.create_subscription(PoseStamped, '/goal_pose', self.goal_callback, 10)
             self.get_logger().info("Edit mode enabled. GUI will be initialized from main.")
+        elif self.mode == 'read':
+            self.load_waypoints_from_json()
+            self.publish_waypoints_for_vis()
+            self.rewrite_marker()
+            self.get_logger().info("Read mode enabled. Waypoints are loaded and visualized in Rviz.")
+            self.timer = self.create_timer(5.0, self.republish_waypoints)
         else:
-            self.get_logger().error(f"Invalid mode: {self.mode}. Use 'write', 'execute', or 'edit'.")
+            self.get_logger().error(f"Invalid mode: {self.mode}. Use 'write', 'execute', 'edit', or 'read'.")
             sys.exit()
+
+    def republish_waypoints(self):
+        """定期的にウェイポイントを再パブリッシュして、Rvizで表示を維持する。"""
+        self.publish_waypoints_for_vis()
+        self.rewrite_marker()
+        self.get_logger().info("Re-publishing waypoints for visualization.")
 
     def load_waypoints_from_json(self):
         try:
@@ -584,7 +596,7 @@ def main(args=None):
     rclpy.init(args=args)
 
     if len(sys.argv) < 3:
-        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-x|-e] <filename>.json [once]")
+        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-x|-e|-r] <filename>.json [once]")
         sys.exit()
 
     mode = None
@@ -602,13 +614,16 @@ def main(args=None):
         elif '-e' in sys.argv:
             mode = 'edit'
             mode_arg_index = sys.argv.index('-e')
+        elif '-r' in sys.argv:
+            mode = 'read'
+            mode_arg_index = sys.argv.index('-r')
         else:
-            print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-x|-e] <filename>.json [once]")
+            print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-x|-e|-r] <filename>.json [once]")
             sys.exit()
 
         filename = sys.argv[mode_arg_index + 1]
     except IndexError:
-        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-x|-e] <filename>.json [once]")
+        print("Usage: ros2 run waypoint_manager waypoint_manager [-w|-x|-e|-r] <filename>.json [once]")
         sys.exit()
 
     if 'once' in sys.argv:
