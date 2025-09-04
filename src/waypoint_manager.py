@@ -4,12 +4,13 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy, QoSDurabilityPolicy
+from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 import sys
 import json
 import os
-from geometry_msgs.msg import PoseArray, PoseStamped, PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseArray, PoseStamped, PoseWithCovarianceStamped, Twist
 from sensor_msgs.msg import Joy
-from std_msgs.msg import Int16
+from std_msgs.msg import Int16, String
 from visualization_msgs.msg import Marker
 from rclpy.qos import qos_profile_sensor_data
 import math
@@ -191,6 +192,20 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
 class Nav2WaypointManager(Node):
     def __init__(self, mode, filename, is_looping=True):
         super().__init__('nav2_waypoint_manager_' + mode)
+
+        self.odometry_switch_type = "LIO raw"
+        # bool型のrosparam(use_gnss_switch)がstring型と解釈されないようにするための設定.
+        bool_descriptor = ParameterDescriptor(
+            name='use_gnss_switch',
+            type=ParameterType.PARAMETER_BOOL,
+            description='Enable or disable the feature',
+            read_only=False
+        )
+        self.declare_parameter("use_gnss_switch", False, bool_descriptor)
+        self.use_gnss_switch_flg = self.get_parameter("use_gnss_switch").value # "gnss-lio-switch" or "localization"
+        self.cmd_vel_topic = self.declare_parameter("cmd_vel_topic", "/cmd_vel").value # gnss_switchの初期動作に使うcmd_velトピック.
+        self.initialize_cmd_vel_linear_x = self.declare_parameter("initialize_cmd_vel_linear_x", 0.5).value # 前進速度[m/s]
+        self.initialize_cmd_vel_angular_z = self.declare_parameter("initialize_cmd_vel_angular_z", 0.5).value # 回転速度[rad/s] 
         self.waypoints = []
         self.attributes = []
         self.mode = mode
@@ -237,6 +252,9 @@ class Nav2WaypointManager(Node):
             self.load_waypoints_from_json()
             self.publish_waypoints_for_vis()
             self.rewrite_marker()
+            self.odometry_switch_type_sub = self.create_subscription(String, '/odometry/switch/type', self.odometry_switch_type_callback, 10)
+            self.initialize_cmdvel_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
+            self.wait_for_stable_odometry_switch_type()
             self.send_waypoints_goal()
             self.get_logger().info("Execute mode enabled. Starting navigation...")
         elif self.mode == 'edit':
@@ -508,6 +526,26 @@ class Nav2WaypointManager(Node):
         time_diff = current_time - self.last_message_time
         if time_diff.nanoseconds / 1e9 > self.topic_timeout:
             self.get_logger().warn("Timeout on /estimated_pose. Last message older than specified limit.")
+
+    def wait_for_stable_odometry_switch_type(self):
+        if self.use_gnss_switch_flg:
+            # gnss-lio-switchが安定するまで円運動.
+            while self.odometry_switch_type == "LIO raw":
+                msg = Twist()
+                msg.linear.x = self.initialize_cmd_vel_linear_x
+                msg.angular.z = self.initialize_cmd_vel_angular_z
+                self.initialize_cmdvel_pub.publish(msg)
+                self.get_logger().info("gnss-lio-switch initializing...")
+                time.sleep(1)
+                rclpy.spin_once(self, timeout_sec=1.0)
+            self.get_logger().info("gnss-lio-switch is stable now.")
+            time.sleep(10) # 安定のために少し待つ.
+        else:
+            # localizationを使う場合、初期円運動は不要.
+            return
+
+    def odometry_switch_type_callback(self, msg):
+        self.odometry_switch_type = msg.data
 
     def send_waypoints_goal(self):
         if not self.waypoints:
