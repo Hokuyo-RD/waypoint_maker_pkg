@@ -65,27 +65,28 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
         attribute_frame = tk.LabelFrame(right_panel_frame, text="Edit Attributes")
         attribute_frame.pack(fill=tk.X, pady=5)
         
-        # 属性タイプと説明のグリッドを定義
-        tk.Label(attribute_frame, text="Type:", anchor="w").grid(row=0, column=0, padx=5, pady=2, sticky="W")
-
-        # Normal
-        tk.Button(attribute_frame, text="Normal", command=lambda: self.set_attribute_type('normal')).grid(row=0, column=1, padx=2, pady=2, sticky="EW")
-        tk.Label(attribute_frame, text="Normal travel speed. Please set 0.0").grid(row=1, column=1, columnspan=1, padx=2, pady=2, sticky="EW")
-
-        # Stop
-        tk.Button(attribute_frame, text="Stop", command=lambda: self.set_attribute_type('stop')).grid(row=0, column=2, padx=2, pady=2, sticky="EW")
-        tk.Label(attribute_frame, text="Stop and wait. Unit: seconds").grid(row=1, column=2, columnspan=1, padx=2, pady=2, sticky="EW")
-
-        # Slow
-        tk.Button(attribute_frame, text="Slow", command=lambda: self.set_attribute_type('slow')).grid(row=0, column=3, padx=2, pady=2, sticky="EW")
-        tk.Label(attribute_frame, text="Travel at a specified speed. Unit: m/s").grid(row=1, column=3, columnspan=1, padx=2, pady=2, sticky="EW")
-
-        tk.Label(attribute_frame, text="Value:").grid(row=2, column=0, padx=5, pady=2, sticky="W")
+        # 修正箇所: 属性の入力欄とボタンの配置を入れ替え
+        # 属性の値の入力欄を一番上に配置
+        tk.Label(attribute_frame, text="Value:", anchor="w").grid(row=0, column=0, padx=5, pady=2, sticky="W")
         self.attr_value_var = tk.StringVar()
         self.attr_value_entry = tk.Entry(attribute_frame, textvariable=self.attr_value_var)
-        self.attr_value_entry.grid(row=2, column=1, columnspan=3, padx=5, pady=2, sticky="EW")
-
-        # 単位のラベルを追加
+        self.attr_value_entry.grid(row=0, column=1, columnspan=3, padx=5, pady=2, sticky="EW")
+        
+        # 属性のタイプを選択するボタンを下に配置
+        tk.Label(attribute_frame, text="Type:", anchor="w").grid(row=1, column=0, padx=5, pady=2, sticky="W")
+        
+        # Normal
+        tk.Button(attribute_frame, text="Normal", command=lambda: self.set_attribute_type('normal')).grid(row=1, column=1, padx=2, pady=2, sticky="EW")
+        tk.Label(attribute_frame, text="Normal travel speed. Please set 0.0").grid(row=2, column=1, columnspan=1, padx=2, pady=2, sticky="EW")
+        
+        # Stop
+        tk.Button(attribute_frame, text="Stop", command=lambda: self.set_attribute_type('stop')).grid(row=1, column=2, padx=2, pady=2, sticky="EW")
+        tk.Label(attribute_frame, text="Stop and wait. Unit: seconds").grid(row=2, column=2, columnspan=1, padx=2, pady=2, sticky="EW")
+        
+        # Slow
+        tk.Button(attribute_frame, text="Slow", command=lambda: self.set_attribute_type('slow')).grid(row=1, column=3, padx=2, pady=2, sticky="EW")
+        tk.Label(attribute_frame, text="Travel at a specified speed. Unit: m/s").grid(row=2, column=3, columnspan=1, padx=2, pady=2, sticky="EW")
+        
         tk.Label(attribute_frame, text="Please input the value, then you push the button you want to set for parameters.", fg="gray", font=("Arial", 8)).grid(row=3, column=1, columnspan=3, padx=5, pady=2, sticky="W")
         
         attribute_frame.grid_columnconfigure(1, weight=1)
