@@ -205,8 +205,8 @@ class Nav2WaypointManager(Node):
         self.declare_parameter("use_gnss_switch", False, bool_descriptor)
         self.use_gnss_switch_flg = self.get_parameter("use_gnss_switch").value # "gnss-lio-switch" or "localization"
         self.cmd_vel_topic = self.declare_parameter("cmd_vel_topic", "/cmd_vel").value # gnss_switchの初期動作に使うcmd_velトピック.
-        self.initialize_cmd_vel_linear_x = self.declare_parameter("initialize_cmd_vel_linear_x", 0.5).value # 前進速度[m/s]
-        self.initialize_cmd_vel_angular_z = self.declare_parameter("initialize_cmd_vel_angular_z", 0.5).value # 回転速度[rad/s] 
+        self.initialize_cmd_vel_linear_x = self.declare_parameter("initialize_cmd_vel_linear_x", 0.1).value # 前進速度[m/s]
+        self.initialize_radius = self.declare_parameter("initialize_radius", 3.0).value  
         self.waypoints = []
         self.attributes = []
         self.mode = mode
@@ -534,7 +534,7 @@ class Nav2WaypointManager(Node):
             while self.odometry_switch_type == "LIO raw":
                 msg = Twist()
                 msg.linear.x = self.initialize_cmd_vel_linear_x
-                msg.angular.z = self.initialize_cmd_vel_angular_z
+                msg.angular.z = msg.linear.x / self.initialize_radius
                 self.initialize_cmdvel_pub.publish(msg)
                 self.get_logger().info("gnss-lio-switch initializing...")
                 time.sleep(1)
