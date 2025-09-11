@@ -4,13 +4,14 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy, QoSDurabilityPolicy
+from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 import sys
 import json
 import os
-from geometry_msgs.msg import PoseArray, PoseStamped, PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseArray, PoseStamped, PoseWithCovarianceStamped, Twist
 from sensor_msgs.msg import Joy
-from std_msgs.msg import Int16
-from visualization_msgs.msg import Marker
+from std_msgs.msg import Int16, String
+from visualization_msgs.msg import Marker, MarkerArray
 from rclpy.qos import qos_profile_sensor_data
 import math
 from builtin_interfaces.msg import Duration as DurationMsg
@@ -166,9 +167,9 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
             del self.waypoint_list[index_to_remove]
             if index_to_remove < len(self.waypoint_manager_node.attributes):
                 del self.waypoint_manager_node.attributes[index_to_remove]
-            self.waypoint_manager_node.save_waypoints_to_json()
-            self.waypoint_manager_node.publish_waypoints_for_vis()
-            self.waypoint_manager_node.rewrite_marker()
+                
+            # 関数呼び出し
+            self.waypoint_manager_node.update_waypoint_visualization()
             self.update_listbox()
         else:
             messagebox.showerror("Error", "Please select a waypoint to remove.")
@@ -192,6 +193,20 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
 class Nav2WaypointManager(Node):
     def __init__(self, mode, filename, is_looping=True):
         super().__init__('nav2_waypoint_manager_' + mode)
+
+        self.odometry_switch_type = "LIO raw"
+        # bool型のrosparam(use_gnss_switch)がstring型と解釈されないようにするための設定.
+        bool_descriptor = ParameterDescriptor(
+            name='use_gnss_switch',
+            type=ParameterType.PARAMETER_BOOL,
+            description='Enable or disable the feature',
+            read_only=False
+        )
+        self.declare_parameter("use_gnss_switch", False, bool_descriptor)
+        self.use_gnss_switch_flg = self.get_parameter("use_gnss_switch").value # "gnss-lio-switch" or "localization"
+        self.cmd_vel_topic = self.declare_parameter("cmd_vel_topic", "/cmd_vel").value # gnss_switchの初期動作に使うcmd_velトピック.
+        self.initialize_cmd_vel_linear_x = self.declare_parameter("initialize_cmd_vel_linear_x", 0.1).value # 前進速度[m/s]
+        self.initialize_radius = self.declare_parameter("initialize_radius", 3.0).value  
         self.waypoints = []
         self.attributes = []
         self.mode = mode
@@ -216,7 +231,7 @@ class Nav2WaypointManager(Node):
 
         self.waypoint_pub = self.create_publisher(PoseArray, 'waypoints', 10)
         self.marker_pub = self.create_publisher(Marker, 'waypoint_markers', 10)
-        
+        self.marker_array_pub = self.create_publisher(MarkerArray, 'waypoint_marker_array',10)
         self.set_parameters_client = self.create_client(SetParameters, '/controller_server/set_parameters')
         while not self.set_parameters_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('set_parameters service not available, waiting again...')
@@ -238,10 +253,15 @@ class Nav2WaypointManager(Node):
             self.load_waypoints_from_json()
             self.publish_waypoints_for_vis()
             self.rewrite_marker()
+            self.odometry_switch_type_sub = self.create_subscription(String, '/odometry/switch/type', self.odometry_switch_type_callback, 10)
+            self.initialize_cmdvel_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
+            self.wait_for_stable_odometry_switch_type()
             self.send_waypoints_goal()
             self.get_logger().info("Execute mode enabled. Starting navigation...")
         elif self.mode == 'edit':
             self.load_waypoints_from_json()
+            self.publish_waypoints_for_vis()
+            self.rewrite_marker()
             self.goal_sub = self.create_subscription(PoseStamped, '/goal_pose', self.goal_callback, 10)
             self.get_logger().info("Edit mode enabled. GUI will be initialized from main.")
         elif self.mode == 'read':
@@ -313,32 +333,92 @@ class Nav2WaypointManager(Node):
         self.waypoint_pub.publish(pose_array)
 
     def rewrite_marker(self):
+        """
+        MarkerArrayを使用してすべてのウェイポイントマーカーを一度にパブリッシュ
+        """
+        # 既存のマーカーをすべて削除するMarkerArrayを作成
+        marker_array = MarkerArray()
+        # IDが0のマーカーで削除をリクエスト。これによりRvizはIDとNamespaceが一致するすべてのマーカーを削除。
+        delete_marker = Marker()
+        delete_marker.action = Marker.DELETEALL
+        delete_marker.header.frame_id = "map"
+        delete_marker.header.stamp = self.get_clock().now().to_msg()
+        delete_marker.ns = "waypoint_markers"
+        marker_array.markers.append(delete_marker)
+        self.marker_array_pub.publish(marker_array)
+        time.sleep(0.1) # 削除メッセージが処理されるのを待つ
+        
+        # 新しいマーカーを生成してMarkerArrayに追加
+        marker_array = MarkerArray()
+        for i, pose_stamped in enumerate(self.waypoints):
+            marker = Marker()
+            marker.header.frame_id = "map"
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.ns = "waypoint_markers"
+            marker.id = i
+            marker.type = Marker.TEXT_VIEW_FACING
+            marker.action = Marker.ADD
+            marker.pose.position.x = pose_stamped.pose.position.x
+            marker.pose.position.y = pose_stamped.pose.position.y
+            marker.pose.position.z = 0.5  # マーカーが地面に埋もれないようにZ座標を少し上げる
+            marker.pose.orientation.z = pose_stamped.pose.orientation.z
+            marker.pose.orientation.w = pose_stamped.pose.orientation.w
+            marker.scale.z = 0.5
+            marker.color.a = 1.0
+            marker.color.r = 0.0
+            marker.color.g = 0.0
+            marker.color.b = 1.0
+            marker.text = str(i)
+            marker.lifetime = DurationMsg()
+            marker_array.markers.append(marker)
+        self.marker_array_pub.publish(marker_array)
+        # marker_data = Marker()
+        # marker_data.header.frame_id = "map"
+        # marker_data.header.stamp = self.get_clock().now().to_msg()
+        # marker_data.ns = "waypoint_markers"
+        # marker_data.action = Marker.DELETEALL
+        
+        # self.marker_pub.publish(marker_data)
+        # time.sleep(0.1)
+        # self.marker_pub.publish(marker_data)
+
+        # marker_data.action = Marker.ADD
+        # # counter = 0
+        # marker_data.color.a = 1.0
+        # marker_data.scale.z = 0.5
+        # marker_data.lifetime = DurationMsg()
+        # marker_data.type = Marker.TEXT_VIEW_FACING
+
+        # for i, pose_stamped in enumerate(self.waypoints):
+        #     marker_data.id = i #counter
+        #     marker_data.pose.position.x = pose_stamped.pose.position.x
+        #     marker_data.pose.position.y = pose_stamped.pose.position.y
+        #     marker_data.pose.orientation.z = pose_stamped.pose.orientation.z
+        #     marker_data.pose.orientation.w = pose_stamped.pose.orientation.w
+        #     marker_data.text = str(i)
+        #     marker_data.color.r = 0.0
+        #     marker_data.color.g = 0.0
+        #     marker_data.color.b = 1.0
+        #     self.marker_pub.publish(marker_data)
+        #     # counter += 1
+
+    def update_waypoint_visualization(self):
+        """
+        GUI からの操作後にウェイポイントの可視化を更新する
+        """
+        self.save_waypoints_to_json()
+        
+        # 既存のマーカーをすべて削除
         marker_data = Marker()
         marker_data.header.frame_id = "map"
         marker_data.header.stamp = self.get_clock().now().to_msg()
-        marker_data.ns = "waypoint_markers"
+        marker_data.ns = "waypoint_makers"
         marker_data.action = Marker.DELETEALL
         self.marker_pub.publish(marker_data)
-
-        marker_data.action = Marker.ADD
-        counter = 0
-        marker_data.color.a = 1.0
-        marker_data.scale.z = 0.5
-        marker_data.lifetime = DurationMsg()
-        marker_data.type = Marker.TEXT_VIEW_FACING
-
-        for i, pose_stamped in enumerate(self.waypoints):
-            marker_data.id = counter
-            marker_data.pose.position.x = pose_stamped.pose.position.x
-            marker_data.pose.position.y = pose_stamped.pose.position.y
-            marker_data.pose.orientation.z = pose_stamped.pose.orientation.z
-            marker_data.pose.orientation.w = pose_stamped.pose.orientation.w
-            marker_data.text = str(i)
-            marker_data.color.r = 0.0
-            marker_data.color.g = 0.0
-            marker_data.color.b = 1.0
-            self.marker_pub.publish(marker_data)
-            counter += 1
+        self.marker_pub.publish(marker_data) # 確実に削除するため2回送信
+        # 新しいマーカーを生成し、パブリッシュ
+        self.rewrite_marker()
+        self.publish_waypoints_for_vis()
 
     def goal_callback(self, msg):
         if self.mode == 'edit' and self.replace_index != -1:
@@ -510,6 +590,26 @@ class Nav2WaypointManager(Node):
         if time_diff.nanoseconds / 1e9 > self.topic_timeout:
             self.get_logger().warn("Timeout on /estimated_pose. Last message older than specified limit.")
 
+    def wait_for_stable_odometry_switch_type(self):
+        if self.use_gnss_switch_flg:
+            # gnss-lio-switchが安定するまで円運動.
+            while self.odometry_switch_type == "LIO raw":
+                msg = Twist()
+                msg.linear.x = self.initialize_cmd_vel_linear_x
+                msg.angular.z = msg.linear.x / self.initialize_radius
+                self.initialize_cmdvel_pub.publish(msg)
+                self.get_logger().info("gnss-lio-switch initializing...")
+                time.sleep(1)
+                rclpy.spin_once(self, timeout_sec=1.0)
+            self.get_logger().info("gnss-lio-switch is stable now.")
+            time.sleep(10) # 安定のために少し待つ.
+        else:
+            # localizationを使う場合、初期円運動は不要.
+            return
+
+    def odometry_switch_type_callback(self, msg):
+        self.odometry_switch_type = msg.data
+
     def send_waypoints_goal(self):
         if not self.waypoints:
             self.get_logger().error("No waypoints loaded. Exiting.")
@@ -543,6 +643,7 @@ class Nav2WaypointManager(Node):
 
     # 修正: feedback_callback関数を追加
     def feedback_callback(self, feedback_msg):
+        self.get_logger().info(f"Received feedback: {feedback_msg.feedback}")
         feedback = feedback_msg.feedback
         completed_waypoint_index = feedback.current_waypoint - 1
         
