@@ -31,19 +31,19 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
         self.title("Waypoint Editor")
         self.waypoint_manager_node = waypoint_manager_node
         self.waypoint_list = waypoint_manager_node.waypoints
-        
+
         main_frame = tk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         save_button_frame = tk.Frame(main_frame)
         save_button_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
-        
+
         tk.Button(save_button_frame, text="Save", command=self.save_waypoints).pack(side=tk.LEFT, padx=2)
         tk.Button(save_button_frame, text="Save and Exit", command=self.save_and_exit).pack(side=tk.LEFT, padx=2)
-        
+
         list_frame = tk.LabelFrame(main_frame, text="Waypoints")
         list_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
+
         self.listbox = Listbox(list_frame, width=50, height=15)
         self.scrollbar = Scrollbar(list_frame)
         self.listbox.config(yscrollcommand=self.scrollbar.set)
@@ -57,14 +57,14 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
 
         button_frame = tk.LabelFrame(right_panel_frame, text="Actions")
         button_frame.pack(fill=tk.X, pady=2)
-        
+
         tk.Button(button_frame, text="Add Waypoint (2D Goal)", command=self.add_waypoint).pack(fill=tk.X, pady=2)
         tk.Button(button_frame, text="Remove Selected", command=self.remove_waypoint).pack(fill=tk.X, pady=2)
         tk.Button(button_frame, text="Replace Selected (2D Goal)", command=self.replace_waypoint).pack(fill=tk.X, pady=2)
-        
+
         attribute_frame = tk.LabelFrame(right_panel_frame, text="Edit Attributes")
         attribute_frame.pack(fill=tk.X, pady=5)
-        
+
         # 修正: XY Tolerance と Yaw Tolerance の入力フィールドを上部に移動
         tk.Label(attribute_frame, text="XY Tolerance (m):", anchor="w").grid(row=0, column=0, padx=5, pady=2, sticky="W")
         self.xy_tolerance_var = tk.StringVar()
@@ -79,26 +79,26 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
         self.attr_value_var = tk.StringVar()
         self.attr_value_entry = tk.Entry(attribute_frame, textvariable=self.attr_value_var)
         self.attr_value_entry.grid(row=2, column=1, columnspan=3, padx=5, pady=2, sticky="EW")
-        
+
         tk.Label(attribute_frame, text="Type:", anchor="w").grid(row=3, column=0, padx=5, pady=2, sticky="W")
-        
+
         tk.Button(attribute_frame, text="Normal", command=lambda: self.set_attribute_type('normal')).grid(row=3, column=1, padx=2, pady=2, sticky="EW")
         tk.Label(attribute_frame, text="Normal travel speed. Please set 0.0").grid(row=4, column=1, columnspan=1, padx=2, pady=2, sticky="EW")
-        
+
         tk.Button(attribute_frame, text="Stop", command=lambda: self.set_attribute_type('stop')).grid(row=3, column=2, padx=2, pady=2, sticky="EW")
         tk.Label(attribute_frame, text="Stop and wait. Unit: seconds").grid(row=4, column=2, columnspan=1, padx=2, pady=2, sticky="EW")
-        
+
         tk.Button(attribute_frame, text="Slow", command=lambda: self.set_attribute_type('slow')).grid(row=3, column=3, padx=2, pady=2, sticky="EW")
         tk.Label(attribute_frame, text="Travel at a specified speed. Unit: m/s").grid(row=4, column=3, columnspan=1, padx=2, pady=2, sticky="EW")
-        
+
         tk.Label(attribute_frame, text="Please input the value, then you push the button you want to set for parameters.", fg="gray", font=("Arial", 8)).grid(row=5, column=1, columnspan=3, padx=5, pady=2, sticky="W")
-        
+
         attribute_frame.grid_columnconfigure(1, weight=1)
         attribute_frame.grid_columnconfigure(2, weight=1)
         attribute_frame.grid_columnconfigure(3, weight=1)
 
         self.update_listbox()
-    
+
     def on_listbox_select(self, event):
         selected_index = self.listbox.curselection()
         if not selected_index:
@@ -110,7 +110,7 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
             self.attr_value_var.set(attr.get('value', ''))
             self.xy_tolerance_var.set(attr.get('xy_tolerance', ''))
             self.yaw_tolerance_var.set(attr.get('yaw_tolerance', ''))
-            
+
     def set_attribute_type(self, attr_type):
         selected_index = self.listbox.curselection()
         if not selected_index:
@@ -122,7 +122,7 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
             attr_value = float(self.attr_value_var.get()) if self.attr_value_var.get() else 0.0
             xy_tolerance = float(self.xy_tolerance_var.get()) if self.xy_tolerance_var.get() else self.waypoint_manager_node.get_parameter("xy_goal_tolerance").value
             yaw_tolerance = float(self.yaw_tolerance_var.get()) if self.yaw_tolerance_var.get() else self.waypoint_manager_node.get_parameter("yaw_goal_tolerance").value
-            
+
             if index < len(self.waypoint_manager_node.attributes):
                 self.waypoint_manager_node.attributes[index]["type"] = attr_type
                 self.waypoint_manager_node.attributes[index]["value"] = attr_value
@@ -131,13 +131,13 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
             else:
                 messagebox.showerror("Error", "Waypoint attributes not found for this index.")
                 return
-            
+
             self.waypoint_manager_node.save_waypoints_to_json()
             self.update_listbox_and_keep_selection(index)
             messagebox.showinfo("Success", f"Attributes '{attr_type}' applied successfully.")
         except ValueError:
             messagebox.showerror("Error", "Invalid value. Please enter a number.")
-            
+
     def update_listbox(self):
         self.listbox.delete(0, tk.END)
         for i, waypoint in enumerate(self.waypoint_list):
@@ -153,7 +153,7 @@ class Nav2WaypointManagerGUI(tk.Toplevel):
             ori = waypoint.pose.orientation
             attr = self.waypoint_manager_node.attributes[i] if i < len(self.waypoint_manager_node.attributes) else {"type": "normal", "value": 0}
             self.listbox.insert(tk.END, f"[{i}] x:{pos.x:.2f}, y:{pos.y:.2f}, z:{ori.z:.2f}, w:{ori.w:.2f} | Type: {attr.get('type')}, Value: {attr.get('value')}, XY_tol: {attr.get('xy_tolerance')}, Yaw_tol: {attr.get('yaw_tolerance')}")
-        
+
         self.listbox.selection_set(selected_index)
         self.listbox.activate(selected_index)
         self.listbox.see(selected_index)
@@ -228,7 +228,7 @@ class Nav2WaypointManager(Node):
         self.topic_timeout = self.declare_parameter('estimated_pose_timeout', 20.0).value
         self.lio_loc_pose = PoseStamped()
         self.is_looping = is_looping
-        
+
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
@@ -238,7 +238,7 @@ class Nav2WaypointManager(Node):
 
         self.waypoint_pub = self.create_publisher(PoseArray, 'waypoints', 10)
         self.marker_array_pub = self.create_publisher(MarkerArray, 'waypoint_marker_array', 10)
-        
+
         self.set_parameters_client = self.create_client(SetParameters, '/controller_server/set_parameters')
         while not self.set_parameters_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('set_parameters service not available, waiting again...')
@@ -301,7 +301,7 @@ class Nav2WaypointManager(Node):
                     pose_stamped.pose.orientation.z = item[1][2]
                     pose_stamped.pose.orientation.w = item[1][3]
                     self.waypoints.append(pose_stamped)
-                    
+
                     # 属性のロード時にデフォルト値を設定
                     attribute = item[2] if len(item) > 2 else {"type": "normal", "value": 0, "xy_tolerance": 1.0, "yaw_tolerance": 3.14}
                     attribute["xy_tolerance"] = attribute.get("xy_tolerance", 1.0)
@@ -349,7 +349,7 @@ class Nav2WaypointManager(Node):
         marker_array.markers.append(delete_marker)
         self.marker_array_pub.publish(marker_array)
         time.sleep(0.1)
-        
+
         marker_array = MarkerArray()
         for i, pose_stamped in enumerate(self.waypoints):
             marker = Marker()
@@ -362,6 +362,9 @@ class Nav2WaypointManager(Node):
             marker.pose.position.x = pose_stamped.pose.position.x
             marker.pose.position.y = pose_stamped.pose.position.y
             marker.pose.position.z = 0.5
+            # ウェイポイントの向きを設定して、テキストが正しく表示されるようにする
+            marker.pose.orientation.x = pose_stamped.pose.orientation.x
+            marker.pose.orientation.y = pose_stamped.pose.orientation.y
             marker.pose.orientation.z = pose_stamped.pose.orientation.z
             marker.pose.orientation.w = pose_stamped.pose.orientation.w
             marker.scale.z = 0.5
@@ -369,11 +372,23 @@ class Nav2WaypointManager(Node):
             marker.color.r = 0.0
             marker.color.g = 0.0
             marker.color.b = 1.0
-            marker.text = str(i)
+
+            # テキスト文字列をカスタマイズして、x, y, z, qx, qy, qz, qwの座標と向きを表示
+            x = pose_stamped.pose.position.x
+            y = pose_stamped.pose.position.y
+            z = pose_stamped.pose.position.z
+            qx = pose_stamped.pose.orientation.x
+            qy = pose_stamped.pose.orientation.y
+            qz = pose_stamped.pose.orientation.z
+            qw = pose_stamped.pose.orientation.w
+
+            marker.text = f"[{i}]\nx: {x:.2f}\ny: {y:.2f}\nz: {z:.2f}\nqx: {qx:.2f}\nqy: {qy:.2f}\nqz: {qz:.2f}\nqw: {qw:.2f}"
+
             marker.lifetime = DurationMsg()
             marker_array.markers.append(marker)
 
         self.marker_array_pub.publish(marker_array)
+
 
     def goal_callback(self, msg):
         if self.mode == 'edit' and self.replace_index != -1:
@@ -594,7 +609,7 @@ class Nav2WaypointManager(Node):
     def feedback_callback(self, feedback_msg):
         feedback = feedback_msg.feedback
         completed_waypoint_index = feedback.current_waypoint - 1
-        
+
         if completed_waypoint_index >= 0 and completed_waypoint_index < len(self.attributes):
             attribute = self.attributes[completed_waypoint_index]
             self.process_waypoint_attribute(attribute)
@@ -602,7 +617,7 @@ class Nav2WaypointManager(Node):
     def get_result_callback(self, future):
         result = future.result().result
         status = future.result().status
-        
+
         if status == GoalStatus.STATUS_SUCCEEDED:
             self.get_logger().info('Goal succeeded! All waypoints reached.')
             if self.is_looping:
@@ -612,18 +627,18 @@ class Nav2WaypointManager(Node):
                 self.get_logger().info('All waypoints processed once. Shutting down.')
         else:
             self.get_logger().warn(f'Goal failed with status: {status}')
-        
+
     def process_waypoint_attribute(self, attribute):
         attr_type = attribute.get("type", "normal")
         attr_value = attribute.get("value", 0)
-        
+
         xy_tolerance = attribute.get("xy_tolerance", self.get_parameter("xy_goal_tolerance").value)
         yaw_tolerance = attribute.get("yaw_tolerance", self.get_parameter("yaw_goal_tolerance").value)
 
         self.get_logger().info(f"Processing attribute: type={attr_type}, value={attr_value}, xy_tolerance={xy_tolerance}, yaw_tolerance={yaw_tolerance}")
 
         request = SetParameters.Request()
-        
+
         request.parameters.append(rclpy.parameter.Parameter('xy_goal_tolerance', rclpy.Parameter.Type.DOUBLE, float(xy_tolerance)).to_parameter_msg())
         request.parameters.append(rclpy.parameter.Parameter('yaw_goal_tolerance', rclpy.Parameter.Type.DOUBLE, float(yaw_tolerance)).to_parameter_msg())
 
@@ -631,14 +646,14 @@ class Nav2WaypointManager(Node):
             self.get_logger().info(f"Stopping for {attr_value} seconds...")
             time.sleep(attr_value)
             self.get_logger().info("Resuming navigation.")
-            
+
         elif attr_type == "slow":
             param = rclpy.parameter.Parameter('max_vel_x', rclpy.Parameter.Type.DOUBLE, float(attr_value))
             request.parameters.append(param.to_parameter_msg())
-            
+
             self.get_logger().info(f"Setting max_vel_x to {attr_value} m/s.")
             self.set_parameters_client.call_async(request)
-            
+
         elif attr_type == "normal":
             param = rclpy.parameter.Parameter('max_vel_x', rclpy.Parameter.Type.DOUBLE, self.original_speed)
             request.parameters.append(param.to_parameter_msg())
@@ -658,7 +673,7 @@ def main(args=None):
     parser.add_argument('-r', '--read', action='store_true', help='Set mode to read.')
     parser.add_argument('filename', type=str, help='The name of the waypoint JSON file.')
     parser.add_argument('--once', action='store_true', help='Execute waypoints only once, do not loop.')
-    
+
     parsed_args, ros_args = parser.parse_known_args()
 
     mode = None
@@ -670,18 +685,18 @@ def main(args=None):
         mode = 'edit'
     elif parsed_args.read:
         mode = 'read'
-    
+
     if mode and parsed_args.filename:
         node = Nav2WaypointManager(mode, parsed_args.filename, not parsed_args.once)
         if mode == 'edit':
             root = tk.Tk()
             root.withdraw()
-            
+
             node.gui = Nav2WaypointManagerGUI(root, node)
-            
+
             thread = threading.Thread(target=ros_spin, args=(node,))
             thread.start()
-            
+
             root.mainloop()
         else:
             rclpy.spin(node)
