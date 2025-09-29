@@ -563,7 +563,8 @@ class Nav2WaypointManager(Node):
             while self.odometry_switch_type == "LIO raw":
                 msg = Twist()
                 msg.linear.x = self.initialize_cmd_vel_linear_x
-                msg.angular.z = msg.linear.x / self.initialize_radius
+                # msg.angular.z = msg.linear.x / self.initialize_radius
+                msg.angular.z = 0
                 self.initialize_cmdvel_pub.publish(msg)
                 self.get_logger().info("gnss-lio-switch initializing...")
                 time.sleep(1)
