@@ -23,6 +23,7 @@ import rclpy.parameter
 from rcl_interfaces.srv import SetParameters
 from nav2_msgs.action import FollowWaypoints
 from action_msgs.msg import GoalStatus
+from std_msgs.msg import Empty
 import argparse
 
 class Nav2WaypointManagerGUI(tk.Toplevel):
@@ -263,6 +264,8 @@ class Nav2WaypointManager(Node):
             self.update_waypoint_visualization()
             self.odometry_switch_type_sub = self.create_subscription(String, '/odometry/switch/type', self.odometry_switch_type_callback, 10)
             self.initialize_cmdvel_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
+            self.stop_command_pub = self.create_publisher(Empty, '/wizurg/stop_cmd_vel', 10)
+            self.start_command_pub = self.create_publisher(Empty, '/wizurg/start_cmd_vel', 10)
             self.wait_for_stable_odometry_switch_type()
             self.send_waypoints_goal()
             self.get_logger().info("Execute mode enabled. Starting navigation...")
@@ -645,7 +648,9 @@ class Nav2WaypointManager(Node):
 
         if attr_type == "stop":
             self.get_logger().info(f"Stopping for {attr_value} seconds...")
+            self.stop_command_pub.publish(Empty())
             time.sleep(attr_value)
+            self.start_command_pub.publish(Empty())
             self.get_logger().info("Resuming navigation.")
 
         elif attr_type == "slow":
