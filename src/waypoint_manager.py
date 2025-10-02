@@ -261,7 +261,10 @@ class Nav2WaypointManager(Node):
             self.timer = self.create_timer(1.0, self.check_timeout)
         elif self.mode == 'execute':
             self.load_waypoints_from_json()
-            self.update_waypoint_visualization()
+            self.behavior_timer = self.create_timer(0.1, self.callback_behavior_timer) # stop等の状態を管理するタイマー.
+            self.last_attr_time = self.get_clock().now()
+            self.current_attr_value = 0
+            self.current_attr_type = "normal"
             self.odometry_switch_type_sub = self.create_subscription(String, '/odometry/switch/type', self.odometry_switch_type_callback, 10)
             self.initialize_cmdvel_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
             self.stop_command_pub = self.create_publisher(Empty, '/wizurg/stop_cmd_vel', 10)
@@ -282,6 +285,15 @@ class Nav2WaypointManager(Node):
         else:
             self.get_logger().error(f"Invalid mode: {self.mode}. Use 'write', 'execute', 'edit', or 'read'.")
             sys.exit()
+
+    def callback_behavior_timer(self):
+        current_time = self.get_clock().now()
+        time_diff = current_time - self.last_attr_time
+        if self.current_attr_type == "stop":
+            if time_diff.nanoseconds > self.current_attr_value * 1e9:
+                self.get_logger().info("Stop duration completed. Resuming navigation.")
+                self.start_command_pub.publish(Empty())
+                self.current_attr_type = "normal"  # 状態をリセット
 
     def republish_waypoints(self):
         self.update_waypoint_visualization()
@@ -649,9 +661,9 @@ class Nav2WaypointManager(Node):
         if attr_type == "stop":
             self.get_logger().info(f"Stopping for {attr_value} seconds...")
             self.stop_command_pub.publish(Empty())
-            time.sleep(attr_value)
-            self.start_command_pub.publish(Empty())
-            self.get_logger().info("Resuming navigation.")
+            self.last_attr_time = self.get_clock().now()
+            self.current_attr_value = attr_value
+            self.current_attr_type = "stop"
 
         elif attr_type == "slow":
             param = rclpy.parameter.Parameter('max_vel_x', rclpy.Parameter.Type.DOUBLE, float(attr_value))
