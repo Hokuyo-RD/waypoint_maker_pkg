@@ -290,10 +290,15 @@ class Nav2WaypointManager(Node):
         current_time = self.get_clock().now()
         time_diff = current_time - self.last_attr_time
         if self.current_attr_type == "stop":
-            if time_diff.nanoseconds > self.current_attr_value * 1e9:
+            if time_diff.nanoseconds / 1e9 > self.current_attr_value:
+                self.reset_attribute_state()
                 self.get_logger().info("Stop duration completed. Resuming navigation.")
-                self.start_command_pub.publish(Empty())
-                self.current_attr_type = "normal"  # 状態をリセット
+    
+    def reset_attribute_state(self):
+        self.start_command_pub.publish(Empty())
+        self.current_attr_type = "normal"
+        self.current_attr_value = 0
+        self.last_attr_time = self.get_clock().now()
 
     def republish_waypoints(self):
         self.update_waypoint_visualization()
@@ -645,6 +650,9 @@ class Nav2WaypointManager(Node):
             self.get_logger().warn(f'Goal failed with status: {status}')
 
     def process_waypoint_attribute(self, attribute):
+        self.reset_attribute_state()  # 前回のwaypointのattributeを解除する.
+
+
         attr_type = attribute.get("type", "normal")
         attr_value = attribute.get("value", 0)
 
