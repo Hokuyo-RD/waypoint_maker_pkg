@@ -265,6 +265,7 @@ class Nav2WaypointManager(Node):
             self.last_attr_time = self.get_clock().now()
             self.current_attr_value = 0
             self.current_attr_type = "normal"
+            self.last_waypoint_index = -1
             self.odometry_switch_type_sub = self.create_subscription(String, '/odometry/switch/type', self.odometry_switch_type_callback, 10)
             self.initialize_cmdvel_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
             self.stop_command_pub = self.create_publisher(Empty, '/wizurg/stop_cmd_vel', 10)
@@ -629,10 +630,17 @@ class Nav2WaypointManager(Node):
 
     def feedback_callback(self, feedback_msg):
         feedback = feedback_msg.feedback
+
+        # 周回する場合、current_waypointが0になるので(N週目の始まり)、要確認.
         completed_waypoint_index = feedback.current_waypoint - 1
 
-        if completed_waypoint_index >= 0 and completed_waypoint_index < len(self.attributes):
+        #ウェイポイント番号が更新されたら、attributeに基づいて動作を変更する.
+        if completed_waypoint_index >= -1 \
+            and completed_waypoint_index < len(self.attributes) \
+            and completed_waypoint_index != self.last_waypoint_index:
+
             attribute = self.attributes[completed_waypoint_index]
+            self.last_waypoint_index = completed_waypoint_index
             self.process_waypoint_attribute(attribute)
 
     def get_result_callback(self, future):
