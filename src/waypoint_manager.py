@@ -642,6 +642,11 @@ class Nav2WaypointManager(Node):
             attribute = self.attributes[completed_waypoint_index]
             self.last_waypoint_index = completed_waypoint_index
             self.process_waypoint_attribute(attribute)
+            print(f"=============waypoint id debug===============")
+            print(f"current_waypoint_index: {feedback.current_waypoint}")
+            print(f"completed_waypoint_index {completed_waypoint_index}")
+            print(f"attribute: {attribute}")
+            print(f"=============================================")
 
     def get_result_callback(self, future):
         result = future.result().result
