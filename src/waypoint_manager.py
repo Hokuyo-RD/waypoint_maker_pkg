@@ -244,7 +244,7 @@ class Nav2WaypointManager(Node):
         self.set_parameters_client = self.create_client(SetParameters, '/controller_server/set_parameters')
         while not self.set_parameters_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('set_parameters service not available, waiting again...')
-        self.original_speed = self.declare_parameter('original_speed', 0.5).value
+        self.original_speed = self.declare_parameter('original_speed', 1.12).value
         self.declare_parameter("xy_goal_tolerance", 0.2)
         self.declare_parameter("yaw_goal_tolerance", 0.1)
 
@@ -355,63 +355,87 @@ class Nav2WaypointManager(Node):
             self.get_logger().error(f"Failed to write waypoint to JSON: {e}")
 
     def update_waypoint_visualization(self):
-        """GUIからの操作後にウェイポイントの可視化を更新する"""
-        pose_array = PoseArray()
-        pose_array.header.frame_id = "map"
-        pose_array.header.stamp = self.get_clock().now().to_msg()
-        for pose_stamped in self.waypoints:
-            pose_array.poses.append(pose_stamped.pose)
-        self.waypoint_pub.publish(pose_array)
+            """GUIからの操作後にウェイポイントの可視化を更新する"""
+            pose_array = PoseArray()
+            pose_array.header.frame_id = "map"
+            pose_array.header.stamp = self.get_clock().now().to_msg()
+            for pose_stamped in self.waypoints:
+                pose_array.poses.append(pose_stamped.pose)
+            self.waypoint_pub.publish(pose_array)
 
-        marker_array = MarkerArray()
-        delete_marker = Marker()
-        delete_marker.action = Marker.DELETEALL
-        delete_marker.header.frame_id = "map"
-        delete_marker.header.stamp = self.get_clock().now().to_msg()
-        delete_marker.ns = "waypoint_markers"
-        marker_array.markers.append(delete_marker)
-        self.marker_array_pub.publish(marker_array)
-        time.sleep(0.1)
+            marker_array = MarkerArray()
+            # 既存のマーカーをすべて削除するためのマーカーをパブリッシュ
+            delete_marker = Marker()
+            delete_marker.action = Marker.DELETEALL
+            delete_marker.header.frame_id = "map"
+            delete_marker.header.stamp = self.get_clock().now().to_msg()
+            delete_marker.ns = "waypoint_markers"
+            marker_array.markers.append(delete_marker)
+            self.marker_array_pub.publish(marker_array)
+            time.sleep(0.1)
 
-        marker_array = MarkerArray()
-        for i, pose_stamped in enumerate(self.waypoints):
-            marker = Marker()
-            marker.header.frame_id = "map"
-            marker.header.stamp = self.get_clock().now().to_msg()
-            marker.ns = "waypoint_markers"
-            marker.id = i
-            marker.type = Marker.TEXT_VIEW_FACING
-            marker.action = Marker.ADD
-            marker.pose.position.x = pose_stamped.pose.position.x
-            marker.pose.position.y = pose_stamped.pose.position.y
-            marker.pose.position.z = 0.5
-            # ウェイポイントの向きを設定して、テキストが正しく表示されるようにする
-            marker.pose.orientation.x = pose_stamped.pose.orientation.x
-            marker.pose.orientation.y = pose_stamped.pose.orientation.y
-            marker.pose.orientation.z = pose_stamped.pose.orientation.z
-            marker.pose.orientation.w = pose_stamped.pose.orientation.w
-            marker.scale.z = 0.5
-            marker.color.a = 1.0
-            marker.color.r = 0.0
-            marker.color.g = 0.0
-            marker.color.b = 1.0
+            # 新しいマーカーを作成してパブリッシュ
+            marker_array = MarkerArray()
+            for i, pose_stamped in enumerate(self.waypoints):
+                marker = Marker()
+                marker.header.frame_id = "map"
+                marker.header.stamp = self.get_clock().now().to_msg()
+                marker.ns = "waypoint_markers"
+                marker.id = i
+                marker.type = Marker.TEXT_VIEW_FACING
+                marker.action = Marker.ADD
+                marker.pose.position.x = pose_stamped.pose.position.x
+                marker.pose.position.y = pose_stamped.pose.position.y
+                marker.pose.position.z = 0.5
+                
+                # ウェイポイントの向きを設定
+                marker.pose.orientation.x = pose_stamped.pose.orientation.x
+                marker.pose.orientation.y = pose_stamped.pose.orientation.y
+                marker.pose.orientation.z = pose_stamped.pose.orientation.z
+                marker.pose.orientation.w = pose_stamped.pose.orientation.w
+                
+                marker.scale.z = 0.5
+                marker.color.a = 1.0
+                marker.color.r = 0.0
+                marker.color.g = 0.0
+                marker.color.b = 1.0
 
-            # テキスト文字列をカスタマイズして、x, y, z, qx, qy, qz, qwの座標と向きを表示
-            x = pose_stamped.pose.position.x
-            y = pose_stamped.pose.position.y
-            z = pose_stamped.pose.position.z
-            qx = pose_stamped.pose.orientation.x
-            qy = pose_stamped.pose.orientation.y
-            qz = pose_stamped.pose.orientation.z
-            qw = pose_stamped.pose.orientation.w
+                # 属性情報を取得
+                attr = self.attributes[i] if i < len(self.attributes) else {"type": "normal", "value": 0}
+                attr_type = attr.get('type', 'normal')
+                attr_value = attr.get('value', 0)
+                
+                unit = ""
+                value_display = f"{attr_value:.2f}"
+                
+                if attr_type == "stop":
+                    unit = "[s]"
+                elif attr_type == "slow":
+                    unit = "[m/s]"
+                
+                # 'normal' 属性の場合は、元の速度と単位を表示
+                if attr_type == "normal":
+                    value_display = f"{self.original_speed:.2f}"
+                    unit = "[m/s]" 
 
-            marker.text = f"[{i}]\nx: {x:.2f}\ny: {y:.2f}\nz: {z:.2f}\nqx: {qx:.2f}\nqy: {qy:.2f}\nqz: {qz:.2f}\nqw: {qw:.2f}"
+                # テキスト文字列をカスタマイズして、x, y座標、属性情報、向き(qz, qw)を表示
+                x = pose_stamped.pose.position.x
+                y = pose_stamped.pose.position.y
+                qz = pose_stamped.pose.orientation.z
+                qw = pose_stamped.pose.orientation.w
 
-            marker.lifetime = DurationMsg()
-            marker_array.markers.append(marker)
+                marker.text = (
+                    f"[{i}]"
+                    f"\nx:{x:.2f}"
+                    f"\ny:{y:.2f}"
+                    f"\nType:{attr_type}"
+                    f"\nValue:{value_display}{unit}"
+                )
 
-        self.marker_array_pub.publish(marker_array)
+                marker.lifetime = DurationMsg()
+                marker_array.markers.append(marker)
 
+            self.marker_array_pub.publish(marker_array)
 
     def goal_callback(self, msg):
         if self.mode == 'edit' and self.replace_index != -1:
