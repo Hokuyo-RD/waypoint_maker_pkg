@@ -24,6 +24,7 @@ from rcl_interfaces.srv import SetParameters
 from nav2_msgs.action import FollowWaypoints
 from action_msgs.msg import GoalStatus
 from std_msgs.msg import Empty
+from std_msgs.msg import Float32
 import argparse
 
 class Nav2WaypointManagerGUI(tk.Toplevel):
@@ -270,6 +271,7 @@ class Nav2WaypointManager(Node):
             self.initialize_cmdvel_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
             self.stop_command_pub = self.create_publisher(Empty, '/wizurg/stop_cmd_vel', 10)
             self.start_command_pub = self.create_publisher(Empty, '/wizurg/start_cmd_vel', 10)
+            self.slow_command_pub = self.create_publisher(Float32, '/wizurg/slow_cmd_vel', 10)
             self.wait_for_stable_odometry_switch_type()
             self.send_waypoints_goal()
             self.get_logger().info("Execute mode enabled. Starting navigation...")
@@ -631,7 +633,7 @@ class Nav2WaypointManager(Node):
     def feedback_callback(self, feedback_msg):
         feedback = feedback_msg.feedback
 
-        # 周回する場合、current_waypointが0になるので(N週目の始まり)、要確認.
+        # 周回する場合、current_waypointが0になるので(N週目の始まり)、要確認. -> python の配列の要素番号 -1 は配列の末尾を指すので問題なし。
         completed_waypoint_index = feedback.current_waypoint - 1
 
         #ウェイポイント番号が更新されたら、attributeに基づいて動作を変更する.
@@ -687,16 +689,22 @@ class Nav2WaypointManager(Node):
             self.current_attr_type = "stop"
 
         elif attr_type == "slow":
-            param = rclpy.parameter.Parameter('max_vel_x', rclpy.Parameter.Type.DOUBLE, float(attr_value))
-            request.parameters.append(param.to_parameter_msg())
-
-            self.get_logger().info(f"Setting max_vel_x to {attr_value} m/s.")
-            self.set_parameters_client.call_async(request)
+            self.get_logger().info(f"Setting max_speed_xy to {attr_value} m/s.")
+            slow_speed = float(attr_value)
+            msg = Float32()
+            msg.data = slow_speed
+            self.slow_command_pub.publish(msg)
+            self.last_attr_time = self.get_clock().now()
+            self.current_attr_value = attr_value
+            self.curent_attr_type = "slow"
+            #param = rclpy.parameter.Parameter('max_speed_xy', rclpy.Parameter.Type.DOUBLE, float(attr_value))
+            #request.parameters.append(param.to_parameter_msg())
+            # self.set_parameters_client.call_async(request)
 
         elif attr_type == "normal":
-            param = rclpy.parameter.Parameter('max_vel_x', rclpy.Parameter.Type.DOUBLE, self.original_speed)
+            param = rclpy.parameter.Parameter('max_speed_xy', rclpy.Parameter.Type.DOUBLE, self.original_speed)
             request.parameters.append(param.to_parameter_msg())
-            self.get_logger().info(f"Setting max_vel_x to original speed {self.original_speed} m/s.")
+            self.get_logger().info(f"Setting max_speed_xy to original speed {self.original_speed} m/s.")
             self.set_parameters_client.call_async(request)
 
 def ros_spin(node):
