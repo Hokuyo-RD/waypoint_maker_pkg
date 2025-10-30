@@ -1,53 +1,14 @@
 # waypoint_manager
 
 ## 概要
-このプログラムは、ROS 2ノードとして動作し、主に以下の3つのモードでウェイポイントを扱います。
-write モード: ロボットの現在位置 (/estimated_pose) やジョイスティックの入力、Rviz2の2D Goal Poseツール (/goal_pose) を使ってウェイポイントを記録し、JSONファイルに保存します。
-read モード: 既存のJSONファイルからウェイポイントを読み込み、Rviz2で可視化するためにPublishします。
-edit モード: GUI (tkinter) を使ってウェイポイントを視覚的に管理・編集します。Rviz2の2D Goal Poseツールを使って、ウェイポイントの追加、削除、置換ができます。
+このプログラムは、ROS 2ノードとして動作し、JSONファイルからウェイポイントを読み込み、Nav2にウェイポイント追従を実行させます。
+
 保存されるウェイポイントはJSON形式で、各ウェイポイントは 
-``` [[x, y, z], [qx, qy, qz, qw]] ```
-の形式で格納されます。ただし、このコードでは位置の z と姿勢の x, y は0.0に固定されており、2Dナビゲーションに特化しています。
+``` [[x, y, z], [qx, qy, qz, qw], {attribute}] ```
+の形式で格納されます。このコードでは位置の z と姿勢の x, y は0.0に固定されており、2Dナビゲーションに特化しています。
+各ウェイポイントには属性（`stop`, `slow`など）を設定でき、ロボットの振る舞いを制御できます。
 
 ## クラスの解説
-### Nav2WaypointManagerGUI(tk.Toplevel)
-このクラスは、edit モードでウェイポイントを管理するためのTkinterベースのGUIウィンドウを構築します。
-
-```
-__init__(self, parent, waypoint_maker_node):
-```
-
-親ウィンドウと Nav2WaypointMaker ノードのインスタンスを受け取ります。
-ウェイポイントを表示するための Listbox と Scrollbar を設定します。
-ウェイポイントの追加、削除、置換、保存のためのボタンを配置します。
-初期状態でウェイポイントリストを更新します。
-```
-update_listbox(self):
-```
-waypoint_list の現在のウェイポイントをクリアし、最新の情報を表示するように Listbox を更新します。
-```
-add_waypoint(self):
-```
-新しいウェイポイントを追加するための処理を開始します。
-
-Rviz2の2D Goal Poseツールを使用して新しいウェイポイントを設定するようにユーザーに促します。
-
-waypoint_maker_node.is_adding と waypoint_maker_node.insert_index を設定し、goal_callback がウェイポイントを正しく追加できるようにします。
-```
-remove_waypoint(self):
-```
-Listbox で選択されたウェイポイントをリストから削除します。
-変更をJSONファイルに保存し、Rviz2での可視化を更新します。
-```
-replace_waypoint(self):
-```
-Listbox で選択されたウェイポイントをRviz2の2D Goal Poseツールで設定される新しいポーズに置き換えるための準備をします。
-
-waypoint_maker_node.replace_index を設定し、goal_callback がウェイポイントを正しく置換できるようにします。
-```
-save_waypoints(self):
-```
-現在のウェイポイントリストをJSONファイルに保存します。
 
 ### Nav2WaypointManager(Node)
 このクラスは、ROS 2ノードの主要なロジックを実装しています。
