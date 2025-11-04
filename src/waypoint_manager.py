@@ -37,8 +37,8 @@ class Nav2WaypointManager(Node):
         self.declare_parameter('yaw_goal_tolerance', 0.25) 
         self.declare_parameter('xy_goal_tolerance', 0.25)
 
-        self.yaw_tolerance = self.get_parameter('yaw_goal_tolerance').get_parameter_value().double_value
-        self.xy_tolerance = self.get_parameter('xy_goal_tolerance').get_parameter_value().double_value
+        # self.yaw_tolerance = self.get_parameter('yaw_goal_tolerance').get_parameter_value().double_value
+        # self.xy_tolerance = self.get_parameter('xy_goal_tolerance').get_parameter_value().double_value
 
         self.use_gnss_switch_flg = self.get_parameter("use_gnss_switch").value
         self.cmd_vel_topic = self.declare_parameter("cmd_vel_topic", "/cmd_vel").value
@@ -274,7 +274,7 @@ class Nav2WaypointManager(Node):
 
         # 1. ナビゲーション中でない場合は、次のゴールを送信
         if not self.is_navigating and self.current_waypoint_index < len(self.waypoints):
-            self.is_navigating = True # Goal送信試行中
+            # self.is_navigating は goal_response_callback でゴールが受理されたときに True に設定される
             next_pose = self.waypoints[self.current_waypoint_index]
             self.send_goal(next_pose)
 
@@ -294,12 +294,17 @@ class Nav2WaypointManager(Node):
                 goal_rot = goal_pose.orientation
                 goal_euler = tf_transformations.euler_from_quaternion([goal_rot.x, goal_rot.y, goal_rot.z, goal_rot.w])
 
+                # 現在のウェイポイントの属性から許容誤差を取得
+                current_attribute = self.attributes[self.current_waypoint_index]
+                xy_tolerance = current_attribute.get('xy_tolerance', self.xy_tolerance)
+                yaw_tolerance = current_attribute.get('yaw_tolerance', self.yaw_tolerance)
+
                 # 距離と角度の差を計算
                 dist_err = math.sqrt((pos.x - goal_pose.position.x)**2 + (pos.y - goal_pose.position.y)**2)
                 yaw_err = self.angle_diff(goal_euler[2], current_euler[2])
 
                 # 到着判定: 距離と角度がそれぞれの許容誤差以内であること(AND条件)
-                if dist_err <= self.xy_tolerance and yaw_err <= self.yaw_tolerance:
+                if dist_err <= xy_tolerance and yaw_err <= yaw_tolerance:
                     self.arrival_check_count += 1
                 else:
                     self.arrival_check_count = 0
