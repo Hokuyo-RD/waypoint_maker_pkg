@@ -2,20 +2,23 @@
 
 import rclpy
 from rclpy.node import Node
-from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy, QoSDurabilityPolicy
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 import sys
 import json
-from geometry_msgs.msg import PoseArray, PoseStamped, Twist
+from geometry_msgs.msg import PoseArray, PoseStamped, Twist, Pose
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 from builtin_interfaces.msg import Duration as DurationMsg
 import time
 import rclpy.parameter
-from rcl_interfaces.srv import SetParameters
-from nav2_msgs.action import FollowWaypoints
-from action_msgs.msg import GoalStatus
+import math
+import tf_transformations
+from tf2_ros import TransformException
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
+from rclpy.action import ActionClient
+from nav2_msgs.action import NavigateToPose
 from std_msgs.msg import Empty
 from std_msgs.msg import Float32
 import argparse
@@ -24,7 +27,6 @@ class Nav2WaypointManager(Node):
     def __init__(self, filename, is_looping=True):
         super().__init__('nav2_waypoint_manager_executor')
 
-        self.odometry_switch_type = "LIO raw"
         bool_descriptor = ParameterDescriptor(
             name='use_gnss_switch',
             type=ParameterType.PARAMETER_BOOL,
@@ -32,52 +34,50 @@ class Nav2WaypointManager(Node):
             read_only=False
         )
         self.declare_parameter("use_gnss_switch", False, bool_descriptor)
+        self.declare_parameter('yaw_goal_tolerance', 0.25) 
+        self.declare_parameter('xy_goal_tolerance', 0.25)
+
+        self.yaw_tolerance = self.get_parameter('yaw_goal_tolerance').get_parameter_value().double_value
+        self.xy_tolerance = self.get_parameter('xy_goal_tolerance').get_parameter_value().double_value
+
         self.use_gnss_switch_flg = self.get_parameter("use_gnss_switch").value
         self.cmd_vel_topic = self.declare_parameter("cmd_vel_topic", "/cmd_vel").value
         self.initialize_cmd_vel_linear_x = self.declare_parameter("initialize_cmd_vel_linear_x", 0.1).value
         self.initialize_radius = self.declare_parameter("initialize_radius", 3.0).value
+
         self.waypoints = []
         self.attributes = []
         self.filename = filename
         self.is_looping = is_looping
 
-        _ = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-            durability=QoSDurabilityPolicy.VOLATILE
-        )
+        self.current_waypoint_index = 0
+        self.is_navigating = False
+        self.arrival_check_count = 0
+        self.odometry_switch_type = "LIO raw"
+        self.goal_handle = None
 
         self.waypoint_pub = self.create_publisher(PoseArray, 'waypoints', 10)
         self.marker_array_pub = self.create_publisher(MarkerArray, 'waypoint_marker_array', 10)
 
         self.original_speed = self.declare_parameter('original_speed', 1.12).value
-        self.action_client = ActionClient(self, FollowWaypoints, 'follow_waypoints')
+        self._action_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
-        # Execute mode logic
-        self.load_waypoints_from_json()
-        self.behavior_timer = self.create_timer(0.1, self.callback_behavior_timer) # stop等の状態を管理するタイマー.
-        self.last_attr_time = self.get_clock().now()
-        self.current_attr_value = 0
-        self.current_attr_type = "normal"
-        self.last_waypoint_index = -1
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
         self.odometry_switch_type_sub = self.create_subscription(String, '/odometry/switch/type', self.odometry_switch_type_callback, 10)
         self.initialize_cmdvel_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
         self.stop_command_pub = self.create_publisher(Empty, '/wizurg/stop_cmd_vel', 10)
         self.start_command_pub = self.create_publisher(Empty, '/wizurg/start_cmd_vel', 10)
         self.slow_command_pub = self.create_publisher(Float32, '/wizurg/slow_cmd_vel', 10)
+
+        self.load_waypoints_from_json()
+        self.update_waypoint_visualization()
+
         self.wait_for_stable_odometry_switch_type()
-        self.send_waypoints_goal()
+        self.main_loop_timer = self.create_timer(0.1, self.main_loop)
         self.get_logger().info("Execute mode enabled. Starting navigation...")
 
-    def callback_behavior_timer(self):
-        current_time = self.get_clock().now()
-        time_diff = current_time - self.last_attr_time
-        if self.current_attr_type == "stop":
-            if time_diff.nanoseconds / 1e9 > self.current_attr_value:
-                self.reset_attribute_state()
-                self.get_logger().info("Stop duration completed. Resuming navigation.")
-    
     def reset_attribute_state(self):
         self.start_command_pub.publish(Empty())
         self.current_attr_type = "normal"
@@ -233,103 +233,132 @@ class Nav2WaypointManager(Node):
     def odometry_switch_type_callback(self, msg):
         self.odometry_switch_type = msg.data
 
-    def send_waypoints_goal(self):
-        if not self.waypoints:
-            self.get_logger().error("No waypoints loaded. Exiting.")
-            return
+    def send_goal(self, pose_stamped: PoseStamped):
+        """Nav2 Action Server に移動目標を送信する"""
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose = pose_stamped
 
         self.get_logger().info("Waiting for Nav2 action server...")
-        if not self.action_client.wait_for_server(timeout_sec=10.0):
-            self.get_logger().error("Nav2 action server not available after waiting. Exiting.")
-            return
+        if not self._action_client.wait_for_server(timeout_sec=5.0):
+             self.get_logger().error('Nav2 action server not available after waiting!')
+             self.is_navigating = False
+             return
 
-        goal_msg = FollowWaypoints.Goal()
-        goal_msg.poses = self.waypoints
-
-        self.get_logger().info("Sending goal to Nav2 action server...")
-        self._action_client_future = self.action_client.send_goal_async(
-            goal_msg,
-            feedback_callback=self.feedback_callback
-        )
-        self._action_client_future.add_done_callback(self.goal_response_callback)
+        self.get_logger().info(f'Sending goal for waypoint {self.current_waypoint_index}...')
+        
+        send_goal_future = self._action_client.send_goal_async(goal_msg)
+        send_goal_future.add_done_callback(self.goal_response_callback)
 
     def goal_response_callback(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
+        self.goal_handle = future.result()
+        if not self.goal_handle.accepted:
             self.get_logger().error('Goal was rejected by action server')
+            self.is_navigating = False
             return
 
-        self.get_logger().info('Goal accepted! Waiting for result...')
-        self._get_result_future = goal_handle.get_result_async()
-        self._get_result_future.add_done_callback(self.get_result_callback)
+        self.get_logger().info('Goal accepted. Starting custom arrival check...')
+        self.is_navigating = True
 
-    def feedback_callback(self, feedback_msg):
-        feedback = feedback_msg.feedback
+    def angle_diff(self, target, current):
+        """-piからpiの範囲で角度の差を計算する"""
+        diff = target - current
+        while diff > math.pi:
+            diff -= 2 * math.pi
+        while diff <= -math.pi:
+            diff += 2 * math.pi
+        return abs(diff)
 
-        # 周回する場合、current_waypointが0になるので(N週目の始まり)、要確認. -> python の配列の要素番号 -1 は配列の末尾を指すので問題なし。
-        completed_waypoint_index = feedback.current_waypoint - 1
+    def main_loop(self):
+        """メインループ (カスタムの到着判定ロジックを実行)"""
+        self.update_waypoint_visualization()
 
-        #ウェイポイント番号が更新されたら、attributeに基づいて動作を変更する.
-        if completed_waypoint_index >= -1 \
-            and completed_waypoint_index < len(self.attributes) \
-            and completed_waypoint_index != self.last_waypoint_index:
+        # 1. ナビゲーション中でない場合は、次のゴールを送信
+        if not self.is_navigating and self.current_waypoint_index < len(self.waypoints):
+            self.is_navigating = True # Goal送信試行中
+            next_pose = self.waypoints[self.current_waypoint_index]
+            self.send_goal(next_pose)
 
-            attribute = self.attributes[completed_waypoint_index]
-            self.last_waypoint_index = completed_waypoint_index
-            self.process_waypoint_attribute(attribute)
-            self.get_logger().info(f'=============waypoint id debug===============')
-            self.get_logger().info(f'current_waypoint_index: {feedback.current_waypoint}')
-            self.get_logger().info(f'completed_waypoint_index {completed_waypoint_index}')
-            self.get_logger().info(f'attribute: {attribute}')
-            self.get_logger().info(f'=============================================')
+        # 2. ナビゲーション中の場合、到着判定ロジックを実行
+        elif self.is_navigating:
+            try:
+                # TF (現在位置) を取得
+                now = rclpy.time.Time()
+                transform = self.tf_buffer.lookup_transform('map', 'base_link', now, timeout=rclpy.duration.Duration(seconds=0.1))
+                
+                # 現在の自己位置と目標位置を取得
+                pos = transform.transform.translation
+                rot = transform.transform.rotation
+                current_euler = tf_transformations.euler_from_quaternion([rot.x, rot.y, rot.z, rot.w])
+                
+                goal_pose = self.waypoints[self.current_waypoint_index].pose
+                goal_rot = goal_pose.orientation
+                goal_euler = tf_transformations.euler_from_quaternion([goal_rot.x, goal_rot.y, goal_rot.z, goal_rot.w])
 
-    def get_result_callback(self, future):
-        result = future.result().result
-        status = future.result().status
+                # 距離と角度の差を計算
+                dist_err = math.sqrt((pos.x - goal_pose.position.x)**2 + (pos.y - goal_pose.position.y)**2)
+                yaw_err = self.angle_diff(goal_euler[2], current_euler[2])
 
-        if status == GoalStatus.STATUS_SUCCEEDED:
-            self.get_logger().info('Goal succeeded! All waypoints reached.')
-            if self.is_looping:
-                self.get_logger().info('Looping back to the beginning...')
-                self.send_waypoints_goal()
-            else:
-                self.get_logger().info('All waypoints processed once. Shutting down.')
-        else:
-            self.get_logger().warn(f'Goal failed with status: {status}')
+                # 到着判定: 距離と角度がそれぞれの許容誤差以内であること(AND条件)
+                if dist_err <= self.xy_tolerance and yaw_err <= self.yaw_tolerance:
+                    self.arrival_check_count += 1
+                else:
+                    self.arrival_check_count = 0
+                
+            except TransformException as ex:
+                self.get_logger().warn(f'Could not transform "base_link" to "map": {ex}')
+                self.arrival_check_count = 0
+                return
+                
+            # 3. 5回連続で閾値内にいれば到達と見なす
+            if self.arrival_check_count > 5:
+                self.get_logger().info(f"Reached waypoint {self.current_waypoint_index}.")
+                
+                # ウェイポイント到達後の属性処理
+                if self.current_waypoint_index < len(self.attributes):
+                    attribute = self.attributes[self.current_waypoint_index]
+                    self.process_waypoint_attribute(attribute)
+
+                # 次のウェイポイントへ
+                self.is_navigating = False
+                self.arrival_check_count = 0
+                self.current_waypoint_index += 1
+
+                # 進行中のゴールをキャンセル
+                if self.goal_handle:
+                    self.goal_handle.cancel_goal_async()
+
+                # 全てのウェイポイントが完了したかチェック
+                if self.current_waypoint_index >= len(self.waypoints):
+                    self.get_logger().info('All waypoints finished!')
+                    if self.is_looping:
+                        self.get_logger().info('Looping waypoints...')
+                        self.current_waypoint_index = 0
+                    else:
+                        self.get_logger().info('Run once mode. Shutting down node...')
+                        self.destroy_timer(self.main_loop_timer)
+                        rclpy.shutdown()
 
     def process_waypoint_attribute(self, attribute):
         self.reset_attribute_state()  # 前回のwaypointのattributeを解除する.
 
-
         attr_type = attribute.get("type", "normal")
         attr_value = attribute.get("value", 0)
 
-        xy_tolerance = attribute.get("xy_tolerance", 1.0)
-        yaw_tolerance = attribute.get("yaw_tolerance", 3.14)
-
-        self.get_logger().info(f"Processing attribute: type={attr_type}, value={attr_value}, xy_tolerance={xy_tolerance}, yaw_tolerance={yaw_tolerance}")
+        self.get_logger().info(f"Processing attribute: type={attr_type}, value={attr_value}")
         if attr_type == "stop":
             self.get_logger().info(f"Stopping for {attr_value} seconds...")
             self.stop_command_pub.publish(Empty())
-            self.last_attr_time = self.get_clock().now()
-            self.current_attr_value = attr_value
-            self.current_attr_type = "stop"
+            time.sleep(float(attr_value)) # 指定時間待機
+            self.get_logger().info("Stop duration completed. Resuming.")
+            self.reset_attribute_state()
 
         elif attr_type == "slow":
             self.get_logger().info(f"Setting max_speed_xy to {attr_value} m/s.")
-            slow_speed = float(attr_value)
-            msg = Float32()
-            msg.data = slow_speed
-            self.slow_command_pub.publish(msg)
-            self.last_attr_time = self.get_clock().now()
-            self.current_attr_value = attr_value
-            self.current_attr_type = "slow"
-            #param = rclpy.parameter.Parameter('max_speed_xy', rclpy.Parameter.Type.DOUBLE, float(attr_value))
-            #request.parameters.append(param.to_parameter_msg())
-            # self.set_parameters_client.call_async(request)
+            self.slow_command_pub.publish(Float32(data=float(attr_value)))
 
         elif attr_type == "normal":
             self.get_logger().info(f"Setting max_speed_xy to original speed {self.original_speed} m/s.")
+            self.reset_attribute_state()
 
 def main(args=None):
     rclpy.init(args=args)
@@ -338,17 +367,23 @@ def main(args=None):
     parser.add_argument('filename', type=str, help='The name of the waypoint JSON file.')
     parser.add_argument('--once', action='store_true', help='Execute waypoints only once, do not loop.')
 
-    parsed_args, ros_args = parser.parse_known_args()
+    parsed_args, _ = parser.parse_known_args()
 
-    if parsed_args.filename:
-        try:
-            node = Nav2WaypointManager(parsed_args.filename, not parsed_args.once)
-            rclpy.spin(node)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            if 'node' in locals() and rclpy.ok():
-                node.destroy_node()
+    if not parsed_args.filename:
+        parser.print_help()
+        rclpy.shutdown()
+        return
+
+    node = None
+    try:
+        node = Nav2WaypointManager(parsed_args.filename, not parsed_args.once)
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if node:
+            node.destroy_node()
+        if rclpy.ok():
             rclpy.shutdown()
 
 if __name__ == '__main__':
