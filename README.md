@@ -4,9 +4,8 @@
 このプログラムは、ROS 2ノードとして動作し、JSONファイルからウェイポイントを読み込み、Nav2にウェイポイント追従を実行させます。
 
 保存されるウェイポイントはJSON形式で、各ウェイポイントは 
-``` [[x, y, z], [qx, qy, qz, qw], {attribute}] ```
-の形式で格納されます。このコードでは位置の z と姿勢の x, y は0.0に固定されており、2Dナビゲーションに特化しています。
-各ウェイポイントには属性（`stop`, `slow`など）を設定でき、ロボットの振る舞いを制御できます。
+``` [[position.x, position.y, position.z], [orientation.x, orientation.y, orientation.z, orientation.w], {attribute}] ```
+の形式で格納されます。各ウェイポイントには属性（`stop`, `slow`など）を設定でき、ロボットの振る舞いを制御できます。
 
 ## クラスの解説
 
@@ -60,8 +59,7 @@ ROSパラメータを宣言し、デフォルト値と説明を設定します�
 ### save_waypoints_to_json(self):
 
 現在の waypoints リストの内容を、指定されたJSONファイルに保存します。
-JSON形式は
-``` [[position.x, position.y, 0.0], [0.0, 0.0, orientation.z, orientation.w]] ``` です。
+JSON形式は `[[position.x, position.y, position.z], [orientation.x, orientation.y, orientation.z, orientation.w]]` です。
 
 ### publish_waypoints_for_vis(self):
 Rviz2でウェイポイントの集合を表示するために、waypoints リストを PoseArray メッセージとして /waypoints トピックにPublishします。

@@ -21,6 +21,7 @@ from rclpy.action import ActionClient
 from nav2_msgs.action import NavigateToPose
 from std_msgs.msg import Empty
 from std_msgs.msg import Float32
+from rcl_interfaces.srv import SetParameters
 import argparse
 
 class Nav2WaypointManager(Node):
@@ -37,8 +38,8 @@ class Nav2WaypointManager(Node):
         self.declare_parameter('yaw_goal_tolerance', 0.25) 
         self.declare_parameter('xy_goal_tolerance', 0.25)
 
-        # self.yaw_tolerance = self.get_parameter('yaw_goal_tolerance').get_parameter_value().double_value
-        # self.xy_tolerance = self.get_parameter('xy_goal_tolerance').get_parameter_value().double_value
+        self.yaw_tolerance = self.get_parameter('yaw_goal_tolerance').get_parameter_value().double_value
+        self.xy_tolerance = self.get_parameter('xy_goal_tolerance').get_parameter_value().double_value
 
         self.use_gnss_switch_flg = self.get_parameter("use_gnss_switch").value
         self.cmd_vel_topic = self.declare_parameter("cmd_vel_topic", "/cmd_vel").value
@@ -49,6 +50,11 @@ class Nav2WaypointManager(Node):
         self.attributes = []
         self.filename = filename
         self.is_looping = is_looping
+        self.last_waypoint_index = -1
+        self.current_attr_type = "normal"
+        self.current_attr_value = 0
+        self.last_attr_time = self.get_clock().now()
+
 
         self.current_waypoint_index = 0
         self.is_navigating = False
@@ -58,6 +64,10 @@ class Nav2WaypointManager(Node):
 
         self.waypoint_pub = self.create_publisher(PoseArray, 'waypoints', 10)
         self.marker_array_pub = self.create_publisher(MarkerArray, 'waypoint_marker_array', 10)
+
+        self.set_parameters_client = self.create_client(SetParameters, '/controller_server/set_parameters')
+        while not self.set_parameters_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('set_parameters service not available, waiting again...')
 
         self.original_speed = self.declare_parameter('original_speed', 1.12).value
         self._action_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
@@ -93,13 +103,13 @@ class Nav2WaypointManager(Node):
                 for item in data:
                     pose_stamped = PoseStamped()
                     pose_stamped.header.frame_id = "map"
-                    pose_stamped.pose.position.x = item[0][0]
-                    pose_stamped.pose.position.y = item[0][1]
-                    pose_stamped.pose.position.z = 0.0
-                    pose_stamped.pose.orientation.x = 0.0
-                    pose_stamped.pose.orientation.y = 0.0
-                    pose_stamped.pose.orientation.z = item[1][2]
-                    pose_stamped.pose.orientation.w = item[1][3]
+                    pose_stamped.pose.position.x = float(item[0][0])
+                    pose_stamped.pose.position.y = float(item[0][1])
+                    pose_stamped.pose.position.z = float(item[0][2]) # Z座標をJSONから読み込む
+                    pose_stamped.pose.orientation.x = float(item[1][0]) # X成分をJSONから読み込む
+                    pose_stamped.pose.orientation.y = float(item[1][1]) # Y成分をJSONから読み込む
+                    pose_stamped.pose.orientation.z = float(item[1][2])
+                    pose_stamped.pose.orientation.w = float(item[1][3])
                     self.waypoints.append(pose_stamped)
 
                     # 属性のロード時にデフォルト値を設定
@@ -120,8 +130,8 @@ class Nav2WaypointManager(Node):
     def save_waypoints_to_json(self):
         data = []
         for i, pose_stamped in enumerate(self.waypoints):
-            position = [pose_stamped.pose.position.x, pose_stamped.pose.position.y, 0.0]
-            orientation = [0.0, 0.0, pose_stamped.pose.orientation.z, pose_stamped.pose.orientation.w]
+            position = [pose_stamped.pose.position.x, pose_stamped.pose.position.y, pose_stamped.pose.position.z] # Z座標を保存
+            orientation = [pose_stamped.pose.orientation.x, pose_stamped.pose.orientation.y, pose_stamped.pose.orientation.z, pose_stamped.pose.orientation.w] # X, Y成分を保存
             attribute = self.attributes[i] if i < len(self.attributes) else {"type": "normal", "value": 0, "xy_tolerance": 1.0, "yaw_tolerance": 3.14}
             data.append([position, orientation, attribute])
         try:
@@ -161,9 +171,9 @@ class Nav2WaypointManager(Node):
                 marker.id = i
                 marker.type = Marker.TEXT_VIEW_FACING
                 marker.action = Marker.ADD
-                marker.pose.position.x = pose_stamped.pose.position.x
-                marker.pose.position.y = pose_stamped.pose.position.y
-                marker.pose.position.z = 0.5
+                marker.pose.position.x = pose_stamped.pose.position.x # X座標
+                marker.pose.position.y = pose_stamped.pose.position.y # Y座標
+                marker.pose.position.z = pose_stamped.pose.position.z + 0.5 # Z座標 + 0.5m (テキストが地面から浮くように)
                 
                 # ウェイポイントの向きを設定
                 marker.pose.orientation.x = pose_stamped.pose.orientation.x
@@ -268,9 +278,19 @@ class Nav2WaypointManager(Node):
             diff += 2 * math.pi
         return abs(diff)
 
+    def callback_behavior_timer(self):
+        current_time = self.get_clock().now()
+        time_diff = current_time - self.last_attr_time
+        if self.current_attr_type == "stop":
+            if time_diff.nanoseconds / 1e9 > self.current_attr_value:
+                self.reset_attribute_state()
+                self.get_logger().info("Stop duration completed. Resuming navigation.")
+
     def main_loop(self):
         """メインループ (カスタムの到着判定ロジックを実行)"""
         self.update_waypoint_visualization()
+        
+        self.callback_behavior_timer()
 
         # 1. ナビゲーション中でない場合は、次のゴールを送信
         if not self.is_navigating and self.current_waypoint_index < len(self.waypoints):
@@ -296,9 +316,15 @@ class Nav2WaypointManager(Node):
 
                 # 現在のウェイポイントの属性から許容誤差を取得
                 current_attribute = self.attributes[self.current_waypoint_index]
-                xy_tolerance = current_attribute.get('xy_tolerance', self.xy_tolerance)
-                yaw_tolerance = current_attribute.get('yaw_tolerance', self.yaw_tolerance)
+                xy_tolerance = current_attribute.get('xy_tolerance', self.get_parameter('xy_goal_tolerance').get_parameter_value().double_value)
+                yaw_tolerance = current_attribute.get('yaw_tolerance', self.get_parameter('yaw_goal_tolerance').get_parameter_value().double_value)
 
+                # デバッグ情報の表示
+                attr_type = current_attribute.get('type', 'normal')
+                attr_value = current_attribute.get('value', 0)
+                self.get_logger().info(
+                    f"Target WP[{self.current_waypoint_index}]: xy_tol={xy_tolerance:.2f}, yaw_tol={yaw_tolerance:.2f}, attr='{attr_type}', val={attr_value}"
+                )
                 # 距離と角度の差を計算
                 dist_err = math.sqrt((pos.x - goal_pose.position.x)**2 + (pos.y - goal_pose.position.y)**2)
                 yaw_err = self.angle_diff(goal_euler[2], current_euler[2])
@@ -315,14 +341,16 @@ class Nav2WaypointManager(Node):
                 return
                 
             # 3. 5回連続で閾値内にいれば到達と見なす
-            if self.arrival_check_count > 5:
+            if self.arrival_check_count > 1:
                 self.get_logger().info(f"Reached waypoint {self.current_waypoint_index}.")
                 
-                # ウェイポイント到達後の属性処理
-                if self.current_waypoint_index < len(self.attributes):
-                    attribute = self.attributes[self.current_waypoint_index]
+                # ウェイポイント到達後の属性処理 (last_waypoint_indexが更新された場合のみ)
+                if self.current_waypoint_index != self.last_waypoint_index and self.current_waypoint_index < len(self.attributes):
+                    attribute = self.attributes[self.current_waypoint_index] # 次のウェイポイントの属性
                     self.process_waypoint_attribute(attribute)
-
+                    self.last_waypoint_index = self.current_waypoint_index
+                    self.get_logger().info(f"Processing attribute for waypoint {self.current_waypoint_index}")
+                
                 # 次のウェイポイントへ
                 self.is_navigating = False
                 self.arrival_check_count = 0
@@ -344,26 +372,42 @@ class Nav2WaypointManager(Node):
                         rclpy.shutdown()
 
     def process_waypoint_attribute(self, attribute):
-        self.reset_attribute_state()  # 前回のwaypointのattributeを解除する.
+        self.reset_attribute_state()  # 前回のwaypointのattributeを解除する
 
         attr_type = attribute.get("type", "normal")
         attr_value = attribute.get("value", 0)
+        xy_tolerance = attribute.get("xy_tolerance", self.get_parameter("xy_goal_tolerance").value)
+        yaw_tolerance = attribute.get("yaw_tolerance", self.get_parameter("yaw_goal_tolerance").value)
 
-        self.get_logger().info(f"Processing attribute: type={attr_type}, value={attr_value}")
+        self.get_logger().info(f"Processing attribute: type={attr_type}, value={attr_value}, xy_tolerance={xy_tolerance}, yaw_tolerance={yaw_tolerance}")
+
+        request = SetParameters.Request()
+        request.parameters.append(rclpy.parameter.Parameter('xy_goal_tolerance', rclpy.Parameter.Type.DOUBLE, float(xy_tolerance)).to_parameter_msg())
+        request.parameters.append(rclpy.parameter.Parameter('yaw_goal_tolerance', rclpy.Parameter.Type.DOUBLE, float(yaw_tolerance)).to_parameter_msg())
+
         if attr_type == "stop":
             self.get_logger().info(f"Stopping for {attr_value} seconds...")
             self.stop_command_pub.publish(Empty())
-            time.sleep(float(attr_value)) # 指定時間待機
-            self.get_logger().info("Stop duration completed. Resuming.")
-            self.reset_attribute_state()
+            self.last_attr_time = self.get_clock().now()
+            self.current_attr_value = float(attr_value)
+            self.current_attr_type = "stop"
 
         elif attr_type == "slow":
             self.get_logger().info(f"Setting max_speed_xy to {attr_value} m/s.")
-            self.slow_command_pub.publish(Float32(data=float(attr_value)))
+            slow_speed = float(attr_value)
+            msg = Float32()
+            msg.data = slow_speed
+            self.slow_command_pub.publish(msg)
+            self.last_attr_time = self.get_clock().now()
+            self.current_attr_value = attr_value
+            self.current_attr_type = "slow"
 
         elif attr_type == "normal":
+            param = rclpy.parameter.Parameter('max_speed_xy', rclpy.Parameter.Type.DOUBLE, self.original_speed)
+            request.parameters.append(param.to_parameter_msg())
             self.get_logger().info(f"Setting max_speed_xy to original speed {self.original_speed} m/s.")
-            self.reset_attribute_state()
+
+        self.set_parameters_client.call_async(request)
 
 def main(args=None):
     rclpy.init(args=args)
