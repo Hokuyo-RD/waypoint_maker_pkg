@@ -51,15 +51,8 @@ class Nav2WaypointManager(Node):
         self.waypoint_pub = self.create_publisher(PoseArray, 'waypoints', 10)
         self.marker_array_pub = self.create_publisher(MarkerArray, 'waypoint_marker_array', 10)
 
-        self.set_parameters_client = self.create_client(SetParameters, '/controller_server/set_parameters')
-        while not self.set_parameters_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('set_parameters service not available, waiting again...')
         self.original_speed = self.declare_parameter('original_speed', 1.12).value
-        self.declare_parameter("xy_goal_tolerance", 0.2)
-        self.declare_parameter("yaw_goal_tolerance", 0.1)
-
         self.action_client = ActionClient(self, FollowWaypoints, 'follow_waypoints')
-        self.change_params = []
 
         # Execute mode logic
         self.load_waypoints_from_json()
@@ -311,16 +304,10 @@ class Nav2WaypointManager(Node):
         attr_type = attribute.get("type", "normal")
         attr_value = attribute.get("value", 0)
 
-        xy_tolerance = attribute.get("xy_tolerance", self.get_parameter("xy_goal_tolerance").value)
-        yaw_tolerance = attribute.get("yaw_tolerance", self.get_parameter("yaw_goal_tolerance").value)
+        xy_tolerance = attribute.get("xy_tolerance", 1.0)
+        yaw_tolerance = attribute.get("yaw_tolerance", 3.14)
 
         self.get_logger().info(f"Processing attribute: type={attr_type}, value={attr_value}, xy_tolerance={xy_tolerance}, yaw_tolerance={yaw_tolerance}")
-
-        request = SetParameters.Request()
-
-        request.parameters.append(rclpy.parameter.Parameter('xy_goal_tolerance', rclpy.Parameter.Type.DOUBLE, float(xy_tolerance)).to_parameter_msg())
-        request.parameters.append(rclpy.parameter.Parameter('yaw_goal_tolerance', rclpy.Parameter.Type.DOUBLE, float(yaw_tolerance)).to_parameter_msg())
-
         if attr_type == "stop":
             self.get_logger().info(f"Stopping for {attr_value} seconds...")
             self.stop_command_pub.publish(Empty())
@@ -342,10 +329,7 @@ class Nav2WaypointManager(Node):
             # self.set_parameters_client.call_async(request)
 
         elif attr_type == "normal":
-            param = rclpy.parameter.Parameter('max_speed_xy', rclpy.Parameter.Type.DOUBLE, self.original_speed)
-            request.parameters.append(param.to_parameter_msg())
             self.get_logger().info(f"Setting max_speed_xy to original speed {self.original_speed} m/s.")
-            self.set_parameters_client.call_async(request)
 
 def main(args=None):
     rclpy.init(args=args)
