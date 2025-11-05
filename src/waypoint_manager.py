@@ -331,25 +331,31 @@ class Nav2WaypointManager(Node):
                 dist_err = math.sqrt((pos.x - goal_pose.position.x)**2 + (pos.y - goal_pose.position.y)**2)
                 yaw_err = self.angle_diff(goal_euler[2], current_euler[2])
 
-                # --- ウェイポイントを通り過ぎたかどうかの判定 ---
+                # --- ウェイポイントを通り過ぎたかどうかの判定（複数スキップ対応） ---
                 is_passed = False
-                # 最初のウェイポイント以外で判定
-                if self.current_waypoint_index > 0:
-                    prev_pose = self.waypoints[self.current_waypoint_index - 1].pose
-                    # ベクトルA: prev_wp -> current_wp
-                    vec_a_x = goal_pose.position.x - prev_pose.position.x
-                    vec_a_y = goal_pose.position.y - prev_pose.position.y
-                    # ベクトルB: current_wp -> robot_pos
-                    vec_b_x = pos.x - goal_pose.position.x
-                    vec_b_y = pos.y - goal_pose.position.y
-                    
-                    # 内積を計算
-                    dot_product = vec_a_x * vec_b_x + vec_a_y * vec_b_y
-                    
-                    # 内積が正の場合、ロボットはウェイポイントを通り過ぎたと判断
-                    if dot_product > 0:
-                        is_passed = True
-                        self.get_logger().info(f"Waypoint {self.current_waypoint_index} has been passed due to position correction. Considering it as reached.")
+                passed_check_done = False
+                while not passed_check_done and self.current_waypoint_index < len(self.waypoints):
+                    # 最初のウェイポイント以外で判定
+                    if self.current_waypoint_index > 0:
+                        current_goal_pose = self.waypoints[self.current_waypoint_index].pose
+                        prev_pose = self.waypoints[self.current_waypoint_index - 1].pose
+                        # ベクトルA: prev_wp -> current_wp
+                        vec_a_x = current_goal_pose.position.x - prev_pose.position.x
+                        vec_a_y = current_goal_pose.position.y - prev_pose.position.y
+                        # ベクトルB: current_wp -> robot_pos
+                        vec_b_x = pos.x - current_goal_pose.position.x
+                        vec_b_y = pos.y - current_goal_pose.position.y
+                        
+                        dot_product = vec_a_x * vec_b_x + vec_a_y * vec_b_y
+                        
+                        if dot_product > 0:
+                            self.get_logger().info(f"Waypoint {self.current_waypoint_index} has been passed. Checking next one.")
+                            self.current_waypoint_index += 1 # 次のウェイポイントをチェック
+                            is_passed = True
+                        else:
+                            passed_check_done = True # 通り過ぎていないのでチェック終了
+                    else:
+                        passed_check_done = True # 最初のウェイポイントなのでチェック終了
                 # -----------------------------------------
 
                 # 到着判定: 距離と角度がそれぞれの許容誤差以内であること(AND条件)
