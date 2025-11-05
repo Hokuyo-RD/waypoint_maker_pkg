@@ -22,6 +22,7 @@ from nav2_msgs.action import NavigateToPose
 from std_msgs.msg import Empty
 from std_msgs.msg import Float32
 from rcl_interfaces.srv import SetParameters
+import threading
 import argparse
 
 class Nav2WaypointManager(Node):
@@ -59,6 +60,7 @@ class Nav2WaypointManager(Node):
         self.current_waypoint_index = 0
         self.is_navigating = False
         self.arrival_check_count = 0
+        self.shutdown_flag = threading.Event()
         self.odometry_switch_type = "LIO raw"
         self.goal_handle = None
 
@@ -329,6 +331,27 @@ class Nav2WaypointManager(Node):
                 dist_err = math.sqrt((pos.x - goal_pose.position.x)**2 + (pos.y - goal_pose.position.y)**2)
                 yaw_err = self.angle_diff(goal_euler[2], current_euler[2])
 
+                # --- ウェイポイントを通り過ぎたかどうかの判定 ---
+                is_passed = False
+                # 最初のウェイポイント以外で判定
+                if self.current_waypoint_index > 0:
+                    prev_pose = self.waypoints[self.current_waypoint_index - 1].pose
+                    # ベクトルA: prev_wp -> current_wp
+                    vec_a_x = goal_pose.position.x - prev_pose.position.x
+                    vec_a_y = goal_pose.position.y - prev_pose.position.y
+                    # ベクトルB: current_wp -> robot_pos
+                    vec_b_x = pos.x - goal_pose.position.x
+                    vec_b_y = pos.y - goal_pose.position.y
+                    
+                    # 内積を計算
+                    dot_product = vec_a_x * vec_b_x + vec_a_y * vec_b_y
+                    
+                    # 内積が正の場合、ロボットはウェイポイントを通り過ぎたと判断
+                    if dot_product > 0:
+                        is_passed = True
+                        self.get_logger().info(f"Waypoint {self.current_waypoint_index} has been passed due to position correction. Considering it as reached.")
+                # -----------------------------------------
+
                 # 到着判定: 距離と角度がそれぞれの許容誤差以内であること(AND条件)
                 if dist_err <= xy_tolerance and yaw_err <= yaw_tolerance:
                     self.arrival_check_count += 1
@@ -341,7 +364,7 @@ class Nav2WaypointManager(Node):
                 return
                 
             # 3. 5回連続で閾値内にいれば到達と見なす
-            if self.arrival_check_count > 1:
+            if self.arrival_check_count > 1 or is_passed:
                 self.get_logger().info(f"Reached waypoint {self.current_waypoint_index}.")
                 
                 # ウェイポイント到達後の属性処理 (last_waypoint_indexが更新された場合のみ)
@@ -369,7 +392,7 @@ class Nav2WaypointManager(Node):
                     else:
                         self.get_logger().info('Run once mode. Shutting down node...')
                         self.destroy_timer(self.main_loop_timer)
-                        rclpy.shutdown()
+                        self.shutdown_flag.set()
 
     def process_waypoint_attribute(self, attribute):
         self.reset_attribute_state()  # 前回のwaypointのattributeを解除する
@@ -389,25 +412,22 @@ class Nav2WaypointManager(Node):
             self.get_logger().info(f"Stopping for {attr_value} seconds...")
             self.stop_command_pub.publish(Empty())
             self.last_attr_time = self.get_clock().now()
-            self.current_attr_value = float(attr_value)
+            self.current_attr_value = attr_value
             self.current_attr_type = "stop"
 
         elif attr_type == "slow":
-            self.get_logger().info(f"Setting max_speed_xy to {attr_value} m/s.")
-            slow_speed = float(attr_value)
-            msg = Float32()
-            msg.data = slow_speed
-            self.slow_command_pub.publish(msg)
-            self.last_attr_time = self.get_clock().now()
-            self.current_attr_value = attr_value
+            self.get_logger().info(f"Slowing down to {attr_value} m/s.")
+            self.slow_command_pub.publish(Float32(data=float(attr_value)))
             self.current_attr_type = "slow"
 
         elif attr_type == "normal":
             param = rclpy.parameter.Parameter('max_speed_xy', rclpy.Parameter.Type.DOUBLE, self.original_speed)
             request.parameters.append(param.to_parameter_msg())
             self.get_logger().info(f"Setting max_speed_xy to original speed {self.original_speed} m/s.")
-
-        self.set_parameters_client.call_async(request)
+            self.set_parameters_client.call_async(request)
+            self.get_logger().info(f"Resuming original speed ({self.original_speed} m/s).")
+            self.start_command_pub.publish(Empty())
+            self.current_attr_type = "normal"
 
 def main(args=None):
     rclpy.init(args=args)
@@ -426,8 +446,11 @@ def main(args=None):
     node = None
     try:
         node = Nav2WaypointManager(parsed_args.filename, not parsed_args.once)
-        rclpy.spin(node)
+        # rclpy.spin(node)
+        while rclpy.ok() and not node.shutdown_flag.is_set():
+            rclpy.spin_once(node, timeout_sec=0.1)
     except KeyboardInterrupt:
+        node.get_logger().info('KeyboardInterrupt, shutting down.')
         pass
     finally:
         if node:
