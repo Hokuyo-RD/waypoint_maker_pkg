@@ -416,9 +416,14 @@ class Nav2WaypointManager(Node):
             self.current_attr_type = "stop"
 
         elif attr_type == "slow":
-            self.get_logger().info(f"Slowing down to {attr_value} m/s.")
-            self.slow_command_pub.publish(Float32(data=float(attr_value)))
-            self.current_attr_type = "slow"
+            self.get_logger().info(f"Setting max_speed_xy to {attr_value} m/s.")
+            slow_speed = float(attr_value)
+            msg = Float32()
+            msg.data = slow_speed
+            self.slow_command_pub.publish(msg)
+            self.last_attr_time = self.get_clock().now()
+            self.current_attr_value = attr_value
+            self.curent_attr_type = "slow"
 
         elif attr_type == "normal":
             param = rclpy.parameter.Parameter('max_speed_xy', rclpy.Parameter.Type.DOUBLE, self.original_speed)
