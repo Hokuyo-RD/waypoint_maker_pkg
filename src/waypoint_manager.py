@@ -334,17 +334,19 @@ class Nav2WaypointManager(Node):
                 is_passed = False
                 passed_check_done = False
                 while not passed_check_done and self.current_waypoint_index < len(self.waypoints):
-                    # 最初のウェイポイント以外で判定
-                    if self.current_waypoint_index > 0:
+                    # 最初のウェイポイント以外、かつ、目標地点に十分近づいている場合に判定
+                    # 遠くで障害物回避した場合などに誤ってスキップするのを防ぐ
+                    if self.current_waypoint_index > 0 and dist_err < (xy_tolerance * 5.0):
                         current_goal_pose = self.waypoints[self.current_waypoint_index].pose
                         prev_pose = self.waypoints[self.current_waypoint_index - 1].pose
+
                         # ベクトルA: prev_wp -> current_wp
                         vec_a_x = current_goal_pose.position.x - prev_pose.position.x
                         vec_a_y = current_goal_pose.position.y - prev_pose.position.y
                         # ベクトルB: current_wp -> robot_pos
                         vec_b_x = pos.x - current_goal_pose.position.x
                         vec_b_y = pos.y - current_goal_pose.position.y
-                        
+
                         dot_product = vec_a_x * vec_b_x + vec_a_y * vec_b_y
                         
                         if dot_product > 0:
