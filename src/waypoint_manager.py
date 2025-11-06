@@ -2,16 +2,13 @@
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy, QoSDurabilityPolicy
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
-import sys
 import json
 from geometry_msgs.msg import PoseArray, PoseStamped, Twist, Pose
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 from builtin_interfaces.msg import Duration as DurationMsg
 import time
-import rclpy.parameter
 import math
 import tf_transformations
 from tf2_ros import TransformException
@@ -84,9 +81,8 @@ class Nav2WaypointManager(Node):
         self.slow_command_pub = self.create_publisher(Float32, '/wizurg/slow_cmd_vel', 10)
 
         self.load_waypoints_from_json()
-        self.update_waypoint_visualization()
-
         self.wait_for_stable_odometry_switch_type()
+        self.update_waypoint_visualization()
         self.main_loop_timer = self.create_timer(0.1, self.main_loop)
         self.get_logger().info("Execute mode enabled. Starting navigation...")
 
@@ -145,6 +141,7 @@ class Nav2WaypointManager(Node):
 
     def update_waypoint_visualization(self):
             """GUIからの操作後にウェイポイントの可視化を更新する"""
+            time.sleep(0.5)  # 少し待ってから更新
             pose_array = PoseArray()
             pose_array.header.frame_id = "map"
             pose_array.header.stamp = self.get_clock().now().to_msg()
@@ -161,7 +158,6 @@ class Nav2WaypointManager(Node):
             delete_marker.ns = "waypoint_markers"
             marker_array.markers.append(delete_marker)
             self.marker_array_pub.publish(marker_array)
-            time.sleep(0.1)
 
             # 新しいマーカーを作成してパブリッシュ
             marker_array = MarkerArray()
@@ -193,19 +189,24 @@ class Nav2WaypointManager(Node):
                 attr = self.attributes[i] if i < len(self.attributes) else {"type": "normal", "value": 0}
                 attr_type = attr.get('type', 'normal')
                 attr_value = attr.get('value', 0)
+                xy_tolerance = attr.get('xy_tolerance', self.get_parameter('xy_goal_tolerance').get_parameter_value().double_value)
+                yaw_tolerance = attr.get('yaw_tolerance', self.get_parameter('yaw_goal_tolerance').get_parameter_value().double_value)
                 
                 unit = ""
                 value_display = f"{attr_value:.2f}"
                 
                 if attr_type == "stop":
+                    value_display = f"{attr_value:.2f}"
                     unit = "[s]"
+                    
                 elif attr_type == "slow":
+                    value_display = f"{attr_value:.2f}"
                     unit = "[m/s]"
                 
                 # 'normal' 属性の場合は、元の速度と単位を表示
                 if attr_type == "normal":
-                    value_display = f"{self.original_speed:.2f}"
-                    unit = "[m/s]" 
+                    value_display = "None"
+                    unit = "" 
 
                 # テキスト文字列をカスタマイズして、x, y座標、属性情報、向き(qz, qw)を表示
                 x = pose_stamped.pose.position.x
@@ -215,10 +216,10 @@ class Nav2WaypointManager(Node):
 
                 marker.text = (
                     f"[{i}]"
-                    f"\nx:{x:.2f}"
-                    f"\ny:{y:.2f}"
                     f"\nType:{attr_type}"
                     f"\nValue:{value_display}{unit}"
+                    f"\nxy_tol:{xy_tolerance:.2f}[m]"
+                    f"\nyaw_tol:{yaw_tolerance:.2f}[rad]"
                 )
 
                 marker.lifetime = DurationMsg()
@@ -290,8 +291,6 @@ class Nav2WaypointManager(Node):
 
     def main_loop(self):
         """メインループ (カスタムの到着判定ロジックを実行)"""
-        self.update_waypoint_visualization()
-        
         self.callback_behavior_timer()
 
         # 1. ナビゲーション中でない場合は、次のゴールを送信
