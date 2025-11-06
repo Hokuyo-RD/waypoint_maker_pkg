@@ -141,7 +141,7 @@ class Nav2WaypointManager(Node):
 
     def update_waypoint_visualization(self):
             """GUIからの操作後にウェイポイントの可視化を更新する"""
-            time.sleep(0.5)  # 少し待ってから更新
+            time.sleep(1.0)  # 少し待ってから更新
             pose_array = PoseArray()
             pose_array.header.frame_id = "map"
             pose_array.header.stamp = self.get_clock().now().to_msg()
