@@ -336,7 +336,7 @@ class Nav2WaypointManager(Node):
                 while not passed_check_done and self.current_waypoint_index < len(self.waypoints):
                     # 最初のウェイポイント以外、かつ、目標地点に十分近づいている場合に判定
                     # 遠くで障害物回避した場合などに誤ってスキップするのを防ぐ
-                    if self.current_waypoint_index > 0 and dist_err < (xy_tolerance * 5.0):
+                    if self.current_waypoint_index > 0:
                         current_goal_pose = self.waypoints[self.current_waypoint_index].pose
                         prev_pose = self.waypoints[self.current_waypoint_index - 1].pose
 
