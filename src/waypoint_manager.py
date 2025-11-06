@@ -324,12 +324,12 @@ class Nav2WaypointManager(Node):
                 # デバッグ情報の表示
                 attr_type = current_attribute.get('type', 'normal')
                 attr_value = current_attribute.get('value', 0)
-                self.get_logger().info(
-                    f"Target WP[{self.current_waypoint_index}]: xy_tol={xy_tolerance:.2f}, yaw_tol={yaw_tolerance:.2f}, attr='{attr_type}', val={attr_value}"
-                )
                 # 距離と角度の差を計算
                 dist_err = math.sqrt((pos.x - goal_pose.position.x)**2 + (pos.y - goal_pose.position.y)**2)
                 yaw_err = self.angle_diff(goal_euler[2], current_euler[2])
+                self.get_logger().info(
+                    f"Target WP[{self.current_waypoint_index}]: xy_tol={xy_tolerance:.2f}, yaw_tol={yaw_tolerance:.2f}, attr='{attr_type}', val={attr_value}, yaw_err='{yaw_err}, dist_err='{dist_err}'"
+                )
 
                 # --- ウェイポイントを通り過ぎたかどうかの判定（複数スキップ対応） ---
                 is_passed = False
@@ -410,9 +410,9 @@ class Nav2WaypointManager(Node):
 
         self.get_logger().info(f"Processing attribute: type={attr_type}, value={attr_value}, xy_tolerance={xy_tolerance}, yaw_tolerance={yaw_tolerance}")
 
-        request = SetParameters.Request()
-        request.parameters.append(rclpy.parameter.Parameter('xy_goal_tolerance', rclpy.Parameter.Type.DOUBLE, float(xy_tolerance)).to_parameter_msg())
-        request.parameters.append(rclpy.parameter.Parameter('yaw_goal_tolerance', rclpy.Parameter.Type.DOUBLE, float(yaw_tolerance)).to_parameter_msg())
+        # request = SetParameters.Request()
+        # request.parameters.append(rclpy.parameter.Parameter('xy_goal_tolerance', rclpy.Parameter.Type.DOUBLE, float(xy_tolerance)).to_parameter_msg())
+        # request.parameters.append(rclpy.parameter.Parameter('yaw_goal_tolerance', rclpy.Parameter.Type.DOUBLE, float(yaw_tolerance)).to_parameter_msg())
 
         if attr_type == "stop":
             self.get_logger().info(f"Stopping for {attr_value} seconds...")
@@ -433,9 +433,7 @@ class Nav2WaypointManager(Node):
 
         elif attr_type == "normal":
             param = rclpy.parameter.Parameter('max_speed_xy', rclpy.Parameter.Type.DOUBLE, self.original_speed)
-            request.parameters.append(param.to_parameter_msg())
             self.get_logger().info(f"Setting max_speed_xy to original speed {self.original_speed} m/s.")
-            self.set_parameters_client.call_async(request)
             self.get_logger().info(f"Resuming original speed ({self.original_speed} m/s).")
             self.start_command_pub.publish(Empty())
             self.current_attr_type = "normal"
