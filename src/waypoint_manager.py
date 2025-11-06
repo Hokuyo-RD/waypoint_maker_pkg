@@ -238,7 +238,7 @@ class Nav2WaypointManager(Node):
                 time.sleep(1)
                 rclpy.spin_once(self, timeout_sec=1.0)
             self.get_logger().info("gnss-lio-switch is stable now.")
-            time.sleep(10)
+            # time.sleep(10)
         else:
             return
 
@@ -410,10 +410,6 @@ class Nav2WaypointManager(Node):
 
         self.get_logger().info(f"Processing attribute: type={attr_type}, value={attr_value}, xy_tolerance={xy_tolerance}, yaw_tolerance={yaw_tolerance}")
 
-        # request = SetParameters.Request()
-        # request.parameters.append(rclpy.parameter.Parameter('xy_goal_tolerance', rclpy.Parameter.Type.DOUBLE, float(xy_tolerance)).to_parameter_msg())
-        # request.parameters.append(rclpy.parameter.Parameter('yaw_goal_tolerance', rclpy.Parameter.Type.DOUBLE, float(yaw_tolerance)).to_parameter_msg())
-
         if attr_type == "stop":
             self.get_logger().info(f"Stopping for {attr_value} seconds...")
             self.stop_command_pub.publish(Empty())
@@ -432,7 +428,7 @@ class Nav2WaypointManager(Node):
             self.curent_attr_type = "slow"
 
         elif attr_type == "normal":
-            param = rclpy.parameter.Parameter('max_speed_xy', rclpy.Parameter.Type.DOUBLE, self.original_speed)
+            # param = rclpy.parameter.Parameter('max_speed_xy', rclpy.Parameter.Type.DOUBLE, self.original_speed)
             self.get_logger().info(f"Setting max_speed_xy to original speed {self.original_speed} m/s.")
             self.get_logger().info(f"Resuming original speed ({self.original_speed} m/s).")
             self.start_command_pub.publish(Empty())
