@@ -141,7 +141,7 @@ class Nav2WaypointManager(Node):
 
     def update_waypoint_visualization(self):
             """GUIからの操作後にウェイポイントの可視化を更新する"""
-            time.sleep(1.0)  # 少し待ってから更新
+            time.sleep(3.0)  # 少し待ってから更新
             pose_array = PoseArray()
             pose_array.header.frame_id = "map"
             pose_array.header.stamp = self.get_clock().now().to_msg()
@@ -215,7 +215,6 @@ class Nav2WaypointManager(Node):
                 qw = pose_stamped.pose.orientation.w
 
                 marker.text = (
-                    f"[{i}]"
                     f"\nType:{attr_type}"
                     f"\nValue:{value_display}{unit}"
                     f"\nxy_tol:{xy_tolerance:.2f}[m]"
