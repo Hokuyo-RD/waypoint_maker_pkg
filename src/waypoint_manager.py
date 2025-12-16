@@ -20,6 +20,7 @@ from std_msgs.msg import Empty
 from std_msgs.msg import Float32
 from rcl_interfaces.srv import SetParameters
 import threading
+import sys
 import argparse
 
 class Nav2WaypointManager(Node):
@@ -58,6 +59,7 @@ class Nav2WaypointManager(Node):
         self.is_navigating = False
         self.arrival_check_count = 0
         self.shutdown_flag = threading.Event()
+        self.error_flag = threading.Event()
         self.odometry_switch_type = "LIO raw"
         self.goal_handle = None
 
@@ -272,7 +274,8 @@ class Nav2WaypointManager(Node):
         self.get_logger().info("Waiting for Nav2 action server...")
         if not self._action_client.wait_for_server(timeout_sec=5.0):
              self.get_logger().error('Nav2 action server not available after waiting!')
-             self.is_navigating = False
+             self.error_flag.set()
+             self.shutdown_flag.set() # メインループを終了させる
              return
 
         self.get_logger().info(f'Sending goal for waypoint {self.current_waypoint_index}...')
@@ -284,7 +287,8 @@ class Nav2WaypointManager(Node):
         self.goal_handle = future.result()
         if not self.goal_handle.accepted:
             self.get_logger().error('Goal was rejected by action server')
-            self.is_navigating = False
+            self.error_flag.set()
+            self.shutdown_flag.set() # メインループを終了させる
             return
 
         self.get_logger().info('Goal accepted. Starting custom arrival check...')
@@ -405,9 +409,9 @@ class Nav2WaypointManager(Node):
                     self.arrival_check_count = 0
                 
             except TransformException as ex:
-                self.get_logger().warn(f'Could not transform "base_link" to "map": {ex}')
-                self.arrival_check_count = 0
-                return
+                self.get_logger().error(f'Could not transform "base_link" to "map": {ex}. Shutting down node for retry.')
+                self.error_flag.set()
+                self.shutdown_flag.set() # メインループを終了させる
                 
             # 3. 5回連続で閾値内にいれば到達と見なす
             if self.arrival_check_count > 1 or is_passed:
@@ -510,6 +514,10 @@ def main(args=None):
             node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+        # エラーフラグが立っている場合は、異常終了コードを返す
+        if node and node.error_flag.is_set():
+            print("Exiting with error code 1 due to shutdown flag.")
+            sys.exit(1)
 
 if __name__ == '__main__':
     main()
