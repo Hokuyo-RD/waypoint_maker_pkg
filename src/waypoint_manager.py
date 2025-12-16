@@ -63,6 +63,7 @@ class Nav2WaypointManager(Node):
 
         self.waypoint_pub = self.create_publisher(PoseArray, 'waypoints', 10)
         self.marker_array_pub = self.create_publisher(MarkerArray, 'waypoint_marker_array', 10)
+        self.current_goal_marker_pub = self.create_publisher(Marker, 'current_goal_marker', 10)
 
         self.set_parameters_client = self.create_client(SetParameters, '/controller_server/set_parameters')
         while not self.set_parameters_client.wait_for_service(timeout_sec=1.0):
@@ -142,48 +143,66 @@ class Nav2WaypointManager(Node):
     def update_waypoint_visualization(self):
             """GUIからの操作後にウェイポイントの可視化を更新する"""
             time.sleep(3.0)  # 少し待ってから更新
-            pose_array = PoseArray()
-            pose_array.header.frame_id = "map"
-            pose_array.header.stamp = self.get_clock().now().to_msg()
-            for pose_stamped in self.waypoints:
-                pose_array.poses.append(pose_stamped.pose)
-            self.waypoint_pub.publish(pose_array)
+            # PoseArrayのパブリッシュを停止
+            # pose_array = PoseArray()
+            # pose_array.header.frame_id = "map"
+            # pose_array.header.stamp = self.get_clock().now().to_msg()
+            # for pose_stamped in self.waypoints:
+            #     pose_array.poses.append(pose_stamped.pose)
+            # self.waypoint_pub.publish(pose_array)
 
             marker_array = MarkerArray()
-            # 既存のマーカーをすべて削除するためのマーカーをパブリッシュ
+            # 既存のマーカーをすべて削除
             delete_marker = Marker()
             delete_marker.action = Marker.DELETEALL
             delete_marker.header.frame_id = "map"
             delete_marker.header.stamp = self.get_clock().now().to_msg()
-            delete_marker.ns = "waypoint_markers"
             marker_array.markers.append(delete_marker)
-            self.marker_array_pub.publish(marker_array)
 
-            # 新しいマーカーを作成してパブリッシュ
-            marker_array = MarkerArray()
+            # 新しいマーカー（矢印とテキスト）を追加
             for i, pose_stamped in enumerate(self.waypoints):
-                marker = Marker()
-                marker.header.frame_id = "map"
-                marker.header.stamp = self.get_clock().now().to_msg()
-                marker.ns = "waypoint_markers"
-                marker.id = i
-                marker.type = Marker.TEXT_VIEW_FACING
-                marker.action = Marker.ADD
-                marker.pose.position.x = pose_stamped.pose.position.x # X座標
-                marker.pose.position.y = pose_stamped.pose.position.y # Y座標
-                marker.pose.position.z = pose_stamped.pose.position.z + 0.5 # Z座標 + 0.5m (テキストが地面から浮くように)
+                # --- 矢印マーカーの作成 ---
+                arrow_marker = Marker()
+                arrow_marker.header.frame_id = "map"
+                arrow_marker.header.stamp = self.get_clock().now().to_msg()
+                arrow_marker.ns = "waypoint_arrows"
+                arrow_marker.id = i
+                arrow_marker.type = Marker.ARROW
+                arrow_marker.action = Marker.ADD
+                arrow_marker.pose = pose_stamped.pose
+                arrow_marker.scale.x = 1.0  # 矢印の長さ
+                arrow_marker.scale.y = 0.15 # 矢印の幅
+                arrow_marker.scale.z = 0.15 # 矢印の高さ
+                arrow_marker.color.a = 0.8
+                arrow_marker.color.r = 0.0
+                arrow_marker.color.g = 1.0
+                arrow_marker.color.b = 0.0
+                arrow_marker.lifetime = DurationMsg()
+                marker_array.markers.append(arrow_marker)
+
+                # --- テキストマーカーの作成 ---
+                text_marker = Marker()
+                text_marker.header.frame_id = "map"
+                text_marker.header.stamp = self.get_clock().now().to_msg()
+                text_marker.ns = "waypoint_markers"
+                text_marker.id = i
+                text_marker.type = Marker.TEXT_VIEW_FACING
+                text_marker.action = Marker.ADD
+                text_marker.pose.position.x = pose_stamped.pose.position.x # X座標
+                text_marker.pose.position.y = pose_stamped.pose.position.y # Y座標
+                text_marker.pose.position.z = pose_stamped.pose.position.z + 0.5 # Z座標 + 0.5m (テキストが地面から浮くように)
                 
                 # ウェイポイントの向きを設定
-                marker.pose.orientation.x = pose_stamped.pose.orientation.x
-                marker.pose.orientation.y = pose_stamped.pose.orientation.y
-                marker.pose.orientation.z = pose_stamped.pose.orientation.z
-                marker.pose.orientation.w = pose_stamped.pose.orientation.w
+                text_marker.pose.orientation.x = pose_stamped.pose.orientation.x
+                text_marker.pose.orientation.y = pose_stamped.pose.orientation.y
+                text_marker.pose.orientation.z = pose_stamped.pose.orientation.z
+                text_marker.pose.orientation.w = pose_stamped.pose.orientation.w
                 
-                marker.scale.z = 0.5
-                marker.color.a = 1.0
-                marker.color.r = 0.0
-                marker.color.g = 0.0
-                marker.color.b = 1.0
+                text_marker.scale.z = 0.5
+                text_marker.color.a = 1.0
+                text_marker.color.r = 0.0
+                text_marker.color.g = 0.0
+                text_marker.color.b = 1.0
 
                 # 属性情報を取得
                 attr = self.attributes[i] if i < len(self.attributes) else {"type": "normal", "value": 0}
@@ -214,15 +233,15 @@ class Nav2WaypointManager(Node):
                 qz = pose_stamped.pose.orientation.z
                 qw = pose_stamped.pose.orientation.w
 
-                marker.text = (
+                text_marker.text = (
                     f"\nType:{attr_type}"
                     f"\nValue:{value_display}{unit}"
                     f"\nxy_tol:{xy_tolerance:.2f}[m]"
                     f"\nyaw_tol:{yaw_tolerance:.2f}[rad]"
                 )
 
-                marker.lifetime = DurationMsg()
-                marker_array.markers.append(marker)
+                text_marker.lifetime = DurationMsg()
+                marker_array.markers.append(text_marker)
 
             self.marker_array_pub.publish(marker_array)
 
@@ -291,6 +310,35 @@ class Nav2WaypointManager(Node):
     def main_loop(self):
         """メインループ (カスタムの到着判定ロジックを実行)"""
         self.callback_behavior_timer()
+
+        # --- 現在の目標ウェイポイントマーカーの更新 ---
+        # 毎回マーカーを削除し、ナビゲーション中であれば再描画する
+        delete_marker = Marker()
+        delete_marker.header.frame_id = "map"
+        delete_marker.ns = "current_goal"
+        delete_marker.id = 0
+        delete_marker.action = Marker.DELETE
+        self.current_goal_marker_pub.publish(delete_marker)
+
+        if self.is_navigating and self.current_waypoint_index < len(self.waypoints):
+            # 新しい矢印マーカーを作成
+            goal_pose = self.waypoints[self.current_waypoint_index].pose
+            marker = Marker()
+            marker.header.frame_id = "map"
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.ns = "current_goal"
+            marker.id = 0
+            marker.type = Marker.ARROW
+            marker.action = Marker.ADD
+            marker.pose = goal_pose
+            marker.scale.x = 1.5  # 矢印の長さ
+            marker.scale.y = 0.3  # 矢印の幅
+            marker.scale.z = 0.3  # 矢印の高さ
+            marker.color.a = 1.0
+            marker.color.r = 1.0
+            marker.color.g = 0.0
+            marker.color.b = 0.0
+            self.current_goal_marker_pub.publish(marker)
 
         # 1. ナビゲーション中でない場合は、次のゴールを送信
         if not self.is_navigating and self.current_waypoint_index < len(self.waypoints):
