@@ -312,16 +312,8 @@ class Nav2WaypointManager(Node):
         self.callback_behavior_timer()
 
         # --- 現在の目標ウェイポイントマーカーの更新 ---
-        # 毎回マーカーを削除し、ナビゲーション中であれば再描画する
-        delete_marker = Marker()
-        delete_marker.header.frame_id = "map"
-        delete_marker.ns = "current_goal"
-        delete_marker.id = 0
-        delete_marker.action = Marker.DELETE
-        self.current_goal_marker_pub.publish(delete_marker)
-
         if self.is_navigating and self.current_waypoint_index < len(self.waypoints):
-            # 新しい矢印マーカーを作成
+            # 新しい矢印マーカーを作成（ADDアクションで上書き更新）
             goal_pose = self.waypoints[self.current_waypoint_index].pose
             marker = Marker()
             marker.header.frame_id = "map"
@@ -429,6 +421,14 @@ class Nav2WaypointManager(Node):
                     self.get_logger().info(f"Processing attribute for waypoint {self.current_waypoint_index}")
                 
                 # 次のウェイポイントへ
+                # is_navigatingをFalseにする前に、マーカーを削除する
+                delete_marker = Marker()
+                delete_marker.header.frame_id = "map"
+                delete_marker.ns = "current_goal"
+                delete_marker.id = 0
+                delete_marker.action = Marker.DELETE
+                self.current_goal_marker_pub.publish(delete_marker)
+
                 self.is_navigating = False
                 self.arrival_check_count = 0
                 self.current_waypoint_index += 1
