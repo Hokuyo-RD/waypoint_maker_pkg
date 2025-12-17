@@ -249,15 +249,32 @@ class Nav2WaypointManager(Node):
 
     def wait_for_stable_odometry_switch_type(self):
         if self.use_gnss_switch_flg:
+            start_time = self.get_clock().now()
+            timeout_sec = 50.0
             while self.odometry_switch_type == "LIO raw":
+                # タイムアウトチェック
+                elapsed_time = (self.get_clock().now() - start_time).nanoseconds / 1e9
+                if elapsed_time > timeout_sec:
+                    self.get_logger().error(f"Timeout: Odometry switch type did not become stable within {timeout_sec} seconds. Shutting down.")
+                    self.error_flag.set()
+                    self.shutdown_flag.set()
+                    return
+
                 msg = Twist()
-                msg.linear.x = self.initialize_cmd_vel_linear_x
-                # msg.angular.z = msg.linear.x / self.initialize_radius
+                
+                ############################## 初期動作 選択 ##############################
+                msg.linear.x = self.initialize_cmd_vel_linear_x # 初期動作1. 前進
                 msg.angular.z = 0.0
+                # msg.angular.z = msg.linear.x / self.initialize_radius # 初期動作1 + 初期動作2. ゆっくり旋回
+                #########################################################################
+                
                 self.initialize_cmdvel_pub.publish(msg)
-                self.get_logger().info("gnss-lio-switch initializing...")
-                time.sleep(1)
-                rclpy.spin_once(self, timeout_sec=1.0)
+                remaining_time = timeout_sec - elapsed_time
+                self.get_logger().info(f"gnss-lio-switch initializing... Timeout in {remaining_time:.1f} seconds.")
+                # 1秒待機する代わりに、spin_onceでコールバックを処理しつつ待機
+                end_time = time.time() + 1.0
+                while time.time() < end_time:
+                    rclpy.spin_once(self, timeout_sec=0.1)
             self.get_logger().info("gnss-lio-switch is stable now.")
             # time.sleep(10)
         else:
