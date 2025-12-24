@@ -5,6 +5,25 @@
 JSONファイルからウェイポイントを読み込み、Nav2の `navigate_to_pose` アクションを使用してロボットを順番に移動させます。
 各ウェイポイントには属性（停止、減速など）や許容誤差を設定でき、柔軟なナビゲーションが可能です。
 
+---
+
+## 目次
+- [waypoint\_manager](#waypoint_manager)
+  - [概要](#概要)
+  - [目次](#目次)
+  - [ウェイポイントファイル (JSON) の形式](#ウェイポイントファイル-json-の形式)
+  - [ノード: waypoint\_manager](#ノード-waypoint_manager)
+    - [クラス: Nav2WaypointManager](#クラス-nav2waypointmanager)
+      - [パラメータ](#パラメータ)
+      - [トピック (Publishers)](#トピック-publishers)
+      - [トピック (Subscribers)](#トピック-subscribers)
+      - [アクションクライアント](#アクションクライアント)
+    - [主な機能](#主な機能)
+  - [実行方法](#実行方法)
+    - [実行例](#実行例)
+
+---
+
 ## ウェイポイントファイル (JSON) の形式
 ウェイポイントはJSON形式で保存されます。各ウェイポイントは以下のリスト構造を持ちます。
 
@@ -79,7 +98,7 @@ ros2 run waypoint_manager waypoint_manager <filename.json> [--once]
 - `<filename.json>`: ウェイポイントファイルのパス。
 - `--once`: オプション。指定するとループ実行せず、最後のウェイポイントで終了します。指定しない場合はループします。
 
-### 例
+### 実行例
 
 ```bash
 # ループ実行
