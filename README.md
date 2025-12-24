@@ -11,6 +11,7 @@ JSONファイルからウェイポイントを読み込み、Nav2の `navigate_t
 - [waypoint\_manager](#waypoint_manager)
   - [概要](#概要)
   - [目次](#目次)
+  - [インストール](#インストール)
   - [ウェイポイントファイル (JSON) の形式](#ウェイポイントファイル-json-の形式)
   - [ノード: waypoint\_manager](#ノード-waypoint_manager)
     - [クラス: Nav2WaypointManager](#クラス-nav2waypointmanager)
@@ -23,6 +24,16 @@ JSONファイルからウェイポイントを読み込み、Nav2の `navigate_t
     - [実行例](#実行例)
 
 ---
+
+## インストール
+
+```bash
+cd <YOUR-ROS2-WORKSPACE>/src
+git clone https://github.com/hokuyo-rd/waypoint_manager.git
+cd ../
+colcon build --packages-select waypoint_manager
+```
+
 
 ## ウェイポイントファイル (JSON) の形式
 ウェイポイントはJSON形式で保存されます。各ウェイポイントは以下のリスト構造を持ちます。
@@ -60,17 +71,21 @@ Nav2のアクションクライアントとして動作し、ウェイポイン�
 
 #### トピック (Publishers)
 
-- `waypoints` (`geometry_msgs/PoseArray`): 読み込んだウェイポイントの可視化用。
-- `waypoint_marker_array` (`visualization_msgs/MarkerArray`): ウェイポイントの詳細情報（矢印、属性テキスト）の可視化用。
-- `current_goal_marker` (`visualization_msgs/Marker`): 現在目指しているウェイポイントの可視化用。
-- `cmd_vel_topic` (`geometry_msgs/Twist`): `use_gnss_switch` 有効時の初期化動作指令。
-- `/wizurg/stop_cmd_vel` (`std_msgs/Empty`): 停止指令（属性 `stop` 時など）。
-- `/wizurg/start_cmd_vel` (`std_msgs/Empty`): 再開指令（属性 `normal` 時など）。
-- `/wizurg/slow_cmd_vel` (`std_msgs/Float32`): 減速指令（属性 `slow` 時）。
+| トピック名 | 型 | 説明 |
+| --- | --- | --- |
+| `waypoints` | `geometry_msgs/PoseArray` | 読み込んだウェイポイントの可視化用。 |
+| `waypoint_marker_array` | `visualization_msgs/MarkerArray` | ウェイポイントの詳細情報（矢印、属性テキスト）の可視化用。 |
+| `current_goal_marker` | `visualization_msgs/Marker` | 現在目指しているウェイポイントの可視化用。 |
+| `cmd_vel_topic` | `geometry_msgs/Twist` | `use_gnss_switch` 有効時の初期化動作指令。 |
+| `/wizurg/stop_cmd_vel` | `std_msgs/Empty` | 停止指令（属性 `stop` 時など）。 |
+| `/wizurg/start_cmd_vel` | `std_msgs/Empty` | 再開指令（属性 `normal` 時など）。 |
+| `/wizurg/slow_cmd_vel` | `std_msgs/Float32` | 減速指令（属性 `slow` 時）。 |
 
 #### トピック (Subscribers)
 
-- `/odometry/switch/type` (`std_msgs/String`): オドメトリのスイッチタイプ監視用 (`use_gnss_switch` が True の場合)。
+| トピック名 | 型 | 説明 |
+| --- | --- | --- |
+| `/odometry/switch/type` | `std_msgs/String` | オドメトリのスイッチタイプ監視用 (`use_gnss_switch` が True の場合)。 |
 
 #### アクションクライアント
 
