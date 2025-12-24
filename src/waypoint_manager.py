@@ -71,7 +71,7 @@ class Nav2WaypointManager(Node):
         while not self.set_parameters_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('set_parameters service not available, waiting again...')
 
-        self.original_speed = self.declare_parameter('original_speed', 1.12).value
+        self.original_speed = self.declare_parameter('original_speed', 0.56).value
         self._action_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
         self.tf_buffer = Buffer()
