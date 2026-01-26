@@ -278,7 +278,20 @@ class Nav2WaypointManager(Node):
             self.get_logger().info("gnss-lio-switch is stable now.")
             # time.sleep(10)
         else:
-            return
+            self.get_logger().info("use_gnss_switch is false. Waiting for Nav2 to be ready by checking TF.")
+            # TFが利用可能になるまで待機することで、Nav2スタック（特にlocalization）の準備が整うのを待つ
+            timeout = rclpy.duration.Duration(seconds=30.0)
+            start_time = self.get_clock().now()
+            self.get_logger().info('Waiting for transform from map to base_link...')
+            while rclpy.ok() and (self.get_clock().now() - start_time) < timeout:
+                if self.tf_buffer.can_transform('map', 'base_link', rclpy.time.Time()):
+                    self.get_logger().info("TF from map to base_link is available. Nav2 should be ready.")
+                    return
+                rclpy.spin_once(self, timeout_sec=0.5)
+
+            self.get_logger().error(f"Timeout waiting for TF from map to base_link after {timeout.nanoseconds / 1e9} seconds. Shutting down.")
+            self.error_flag.set()
+            self.shutdown_flag.set()
 
     def odometry_switch_type_callback(self, msg):
         self.odometry_switch_type = msg.data
