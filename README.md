@@ -85,7 +85,7 @@ Nav2のアクションクライアントとして動作し、ウェイポイン�
 
 | トピック名 | 型 | 説明 |
 | --- | --- | --- |
-| `/odometry/switch/type` | `std_msgs/String` | オドメトリのスイッチタイプ監視用 (`use_gnss_switch` が True の場合)。 |
+| `/rsf/rsf_odom_type` | `std_msgs/String` | オドメトリのスイッチタイプ監視用 (`use_gnss_switch` が True の場合)。 |
 
 #### アクションクライアント
 
