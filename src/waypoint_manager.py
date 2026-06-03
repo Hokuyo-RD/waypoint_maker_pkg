@@ -54,7 +54,7 @@ class Nav2WaypointManager(Node):
         self.current_attr_value = 0
         self.last_attr_time = self.get_clock().now()
 
-
+        self.sent_current_waypoint = False
         self.current_waypoint_index = 0
         self.is_navigating = False
         self.arrival_check_count = 0
@@ -367,9 +367,11 @@ class Nav2WaypointManager(Node):
             self.current_goal_marker_pub.publish(marker)
 
         # 1. ナビゲーション中でない場合は、次のゴールを送信
-        if not self.is_navigating and self.current_waypoint_index < len(self.waypoints):
+        if not self.is_navigating and self.current_waypoint_index < len(self.waypoints) and not self.sent_current_waypoint:
             # self.is_navigating は goal_response_callback でゴールが受理されたときに True に設定される
+            # 受理される前に複数のゴールを設定してしまうと'Goal was rejected by action server'されてしまうので、新しくsent_current_waypointを追加
             next_pose = self.waypoints[self.current_waypoint_index]
+            self.sent_current_waypoint = True
             self.send_goal(next_pose)
 
         # 2. ナビゲーション中の場合、到着判定ロジックを実行
@@ -425,6 +427,7 @@ class Nav2WaypointManager(Node):
                         if dot_product > 0:
                             self.get_logger().info(f"Waypoint {self.current_waypoint_index} has been passed. Checking next one.")
                             self.current_waypoint_index += 1 # 次のウェイポイントをチェック
+                            self.sent_current_waypoint = False
                             is_passed = True
                         else:
                             passed_check_done = True # 通り過ぎていないのでチェック終了
@@ -466,7 +469,7 @@ class Nav2WaypointManager(Node):
                 self.is_navigating = False
                 self.arrival_check_count = 0
                 self.current_waypoint_index += 1
-
+                self.sent_current_waypoint = False
                 # 進行中のゴールをキャンセル
                 if self.goal_handle:
                     self.goal_handle.cancel_goal_async()
