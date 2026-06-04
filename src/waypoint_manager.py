@@ -77,7 +77,7 @@ class Nav2WaypointManager(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        self.odometry_switch_type_sub = self.create_subscription(String, '/rsf/rsf_odom_type', self.odometry_switch_type_callback, 10)
+        self.odometry_switch_type_sub = self.create_subscription(String, '/odometry/switch/type', self.odometry_switch_type_callback, 10)
         self.initialize_cmdvel_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
         self.stop_command_pub = self.create_publisher(Empty, '/wizurg/stop_cmd_vel', 10)
         self.start_command_pub = self.create_publisher(Empty, '/wizurg/start_cmd_vel', 10)
