@@ -276,10 +276,11 @@ class Nav2WaypointManager(Node):
                 while time.time() < end_time:
                     rclpy.spin_once(self, timeout_sec=0.1)
             self.get_logger().info("gnss-lio-switch is stable now.")
-            # time.sleep(10)
+            time.sleep(10)
         else:
             self.get_logger().info("use_gnss_switch is false. Waiting for Nav2 to be ready by checking TF.")
             # TFが利用可能になるまで待機することで、Nav2スタック（特にlocalization）の準備が整うのを待つ
+            time.sleep(10)
             timeout = rclpy.duration.Duration(seconds=30.0)
             start_time = self.get_clock().now()
             self.get_logger().info('Waiting for transform from map to base_link...')
