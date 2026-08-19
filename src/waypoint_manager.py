@@ -67,9 +67,6 @@ class Nav2WaypointManager(Node):
         self.marker_array_pub = self.create_publisher(MarkerArray, 'waypoint_marker_array', 10)
         self.current_goal_marker_pub = self.create_publisher(Marker, 'current_goal_marker', 10)
 
-        self.set_parameters_client = self.create_client(SetParameters, '/controller_server/set_parameters')
-        while not self.set_parameters_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('set_parameters service not available, waiting again...')
 
         self.original_speed = self.declare_parameter('original_speed', 0.56).value
         self._action_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
@@ -315,6 +312,7 @@ class Nav2WaypointManager(Node):
 
     def goal_response_callback(self, future):
         self.goal_handle = future.result()
+        print(f"Goal accepted: {self.goal_handle.accepted}")
         if not self.goal_handle.accepted:
             self.get_logger().error('Goal was rejected by action server')
             self.error_flag.set()
