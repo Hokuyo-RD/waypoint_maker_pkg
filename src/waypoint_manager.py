@@ -36,9 +36,11 @@ class Nav2WaypointManager(Node):
         self.declare_parameter("use_gnss_switch", False, bool_descriptor)
         self.declare_parameter('yaw_goal_tolerance', 0.25) 
         self.declare_parameter('xy_goal_tolerance', 0.25)
+        self.declare_parameter('waypoint_timeout', 0.0)
 
         self.yaw_tolerance = self.get_parameter('yaw_goal_tolerance').get_parameter_value().double_value
         self.xy_tolerance = self.get_parameter('xy_goal_tolerance').get_parameter_value().double_value
+        self.waypoint_timeout = self.get_parameter('waypoint_timeout').get_parameter_value().double_value
 
         self.use_gnss_switch_flg = self.get_parameter("use_gnss_switch").value
         self.cmd_vel_topic = self.declare_parameter("cmd_vel_topic", "/cmd_vel").value
@@ -62,6 +64,7 @@ class Nav2WaypointManager(Node):
         self.error_flag = threading.Event()
         self.odometry_switch_type = "LIO raw"
         self.goal_handle = None
+        self.navigation_start_time = None
 
         self.waypoint_pub = self.create_publisher(PoseArray, 'waypoints', 10)
         self.marker_array_pub = self.create_publisher(MarkerArray, 'waypoint_marker_array', 10)
@@ -79,6 +82,7 @@ class Nav2WaypointManager(Node):
         self.stop_command_pub = self.create_publisher(Empty, '/wizurg/stop_cmd_vel', 10)
         self.start_command_pub = self.create_publisher(Empty, '/wizurg/start_cmd_vel', 10)
         self.slow_command_pub = self.create_publisher(Float32, '/wizurg/slow_cmd_vel', 10)
+        self.skip_command_sub = self.create_subscription(Empty, '/skip_waypoint', self.skip_command_callback, 10)
 
         self.load_waypoints_from_json()
         self.wait_for_stable_odometry_switch_type()
@@ -321,6 +325,43 @@ class Nav2WaypointManager(Node):
 
         self.get_logger().info('Goal accepted. Starting custom arrival check...')
         self.is_navigating = True
+        self.navigation_start_time = self.get_clock().now()
+
+    def skip_command_callback(self, msg):
+        if self.is_navigating:
+            self.get_logger().info("Skip command received. Skipping current waypoint.")
+            self.skip_current_waypoint()
+
+    def skip_current_waypoint(self):
+        # マーカー削除
+        delete_marker = Marker()
+        delete_marker.header.frame_id = "map"
+        delete_marker.ns = "current_goal"
+        delete_marker.id = 0
+        delete_marker.action = Marker.DELETE
+        self.current_goal_marker_pub.publish(delete_marker)
+
+        self.is_navigating = False
+        self.arrival_check_count = 0
+        self.current_waypoint_index += 1
+
+        # 進行中のゴールをキャンセル
+        if self.goal_handle:
+            self.goal_handle.cancel_goal_async()
+
+        # 全てのウェイポイントが完了したかチェック
+        if self.current_waypoint_index >= len(self.waypoints):
+            self.check_loop_or_finish()
+
+    def check_loop_or_finish(self):
+        self.get_logger().info('All waypoints finished!')
+        if self.is_looping:
+            self.get_logger().info('Looping waypoints...')
+            self.current_waypoint_index = 0
+        else:
+            self.get_logger().info('Run once mode. Shutting down node...')
+            self.destroy_timer(self.main_loop_timer)
+            self.shutdown_flag.set()
 
     def angle_diff(self, target, current):
         """-piからpiの範囲で角度の差を計算する"""
@@ -372,6 +413,14 @@ class Nav2WaypointManager(Node):
 
         # 2. ナビゲーション中の場合、到着判定ロジックを実行
         elif self.is_navigating:
+            # タイムアウト判定 (0より大きい場合のみ有効)
+            if self.waypoint_timeout > 0.0 and self.navigation_start_time:
+                elapsed_time = (self.get_clock().now() - self.navigation_start_time).nanoseconds / 1e9
+                if elapsed_time > self.waypoint_timeout:
+                    self.get_logger().warn(f"Waypoint timeout ({self.waypoint_timeout}s) exceeded. Skipping waypoint {self.current_waypoint_index}.")
+                    self.skip_current_waypoint()
+                    return
+
             try:
                 # TF (現在位置) を取得
                 now = rclpy.time.Time()
@@ -471,14 +520,7 @@ class Nav2WaypointManager(Node):
 
                 # 全てのウェイポイントが完了したかチェック
                 if self.current_waypoint_index >= len(self.waypoints):
-                    self.get_logger().info('All waypoints finished!')
-                    if self.is_looping:
-                        self.get_logger().info('Looping waypoints...')
-                        self.current_waypoint_index = 0
-                    else:
-                        self.get_logger().info('Run once mode. Shutting down node...')
-                        self.destroy_timer(self.main_loop_timer)
-                        self.shutdown_flag.set()
+                    self.check_loop_or_finish()
 
     def process_waypoint_attribute(self, attribute):
         self.reset_attribute_state()  # 前回のwaypointのattributeを解除する
